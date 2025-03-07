@@ -15,11 +15,6 @@ st.set_page_config(page_title="TMMIN PBMD - Dashboard", layout="wide")
 st.image("images/toyota.png", width=250)
 st.header("DASHBOARD ABNORMALITY MANAGEMENT  - PBMD")
 
-# # Sidebar navigation
-# st.sidebar.page_link("app.py", label="Dashboard", icon="📊")
-# st.sidebar.page_link("pages/in_house.py", label="IN HOUSE COST", icon="🏠")
-# st.sidebar.page_link("pages/out_house.py", label="OUT HOUSE COST", icon="🌎")
-# st.sidebar.page_link("pages/packing.py", label="PACKING COST", icon="📦")
 
 with open("config.yaml", "r", encoding="utf-8") as file:
     config = yaml.load(file, Loader=SafeLoader)
@@ -40,7 +35,6 @@ if st.session_state["authentication_status"]:
         st.subheader(f"Welcome {st.session_state['name']}")
     with m[1]:
         authenticator.logout()
-    st.page_link("pages/input_data.py", label="Input Data", icon="📥")
 elif st.session_state["authentication_status"] is False:
     st.error("Username/password is incorrect")
 elif st.session_state["authentication_status"] is None:

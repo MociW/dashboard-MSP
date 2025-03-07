@@ -35,6 +35,7 @@ def abnormal_cal(years, boundaries):
             (ih.tooling_oh + ih.exclusive_investment) AS "tooling",
             ih.total_process_cost AS "process_cost",
             ih.total_cost AS "total_cost",
+            ih.status,
             ih.year_item
         FROM in_house i
         JOIN in_house_detail ih ON i.id = ih.in_house_item
@@ -176,7 +177,7 @@ def full_abnormal_cal(years, boundaries):
         WHEN "Gap Total Cost" > {boundaries} THEN 'Abnormal Above {boundaries}%'
         WHEN "Gap Total Cost" < -{boundaries} THEN 'Abnormal Below -{boundaries}%'
         ELSE 'Normal'
-    END AS "Total Cost Status",
+    END AS "Total Cost Status"
     
     FROM
     gap_calculation
