@@ -1,178 +1,210 @@
 import streamlit as st
 import plotly.express as px
+import pandas as pd
 
 
-def pie_char_with_total_counts(df, title, bounderies):
+def create_status_pie_chart(data, title, color_map=None):
+    """
+    Create a pie chart for status distribution.
+
+    Args:
+        data: DataFrame or Series with status counts
+        title: Chart title
+        color_map: Optional custom color mapping dictionary
+
+    Returns:
+        Plotly figure object
+    """
+    if color_map is None:
+        color_map = {
+            "Normal": "#00CC96",
+            "Abnormal Above": "#EF553B",
+            "Abnormal Below": "#636EFA",
+        }
+
+    # Check if data is a DataFrame or Series
+    is_dataframe = isinstance(data, pd.DataFrame)
+
+    fig = px.pie(
+        data,
+        names="Status" if (is_dataframe and "Status" in data.columns) else data.index,
+        values="count" if (is_dataframe and "count" in data.columns) else data.values,
+        title=title,
+        color="Status" if (is_dataframe and "Status" in data.columns) else data.index,
+        color_discrete_map=color_map,
+    )
+
+    fig.update_traces(textposition="inside", textinfo="percent+label")
+    fig.update_layout(title_x=0, margin=dict(l=0, r=0, t=50, b=0), height=400)
+
+    return fig
+
+
+def display_pie_with_metrics(df, title, boundaries):
+    """
+    Display a pie chart with metrics in a two-column layout.
+
+    Args:
+        df: DataFrame or Series with status counts
+        title: Chart title
+        boundaries: Boundary percentage for abnormal values
+    """
+    # Set up the color mapping with dynamic boundary values
+    color_map = {
+        "Normal": px.colors.qualitative.Pastel[0],
+        f"Abnormal Above {boundaries}%": px.colors.qualitative.Pastel[1],
+        f"Abnormal Below -{boundaries}%": px.colors.qualitative.Pastel[2],
+    }
+
     with st.container(border=False):
         # Create two columns for the main content
-        main_col1, main_col2 = st.columns([1, 0.55], border=True)
+        main_col1, main_col2 = st.columns([1, 0.55], gap="small", border=True)
 
         # First column for the pie chart
         with main_col1:
-            pastel_colors = px.colors.qualitative.Pastel
-            fig = px.pie(
-                df,
-                names=df.index,
-                values=df.values,
-                color=df.index,
-                color_discrete_map={
-                    "Normal": pastel_colors[0],
-                    f"Abnormal Above {bounderies}%": pastel_colors[1],
-                    f"Abnormal Below -{bounderies}%": pastel_colors[2],
-                },
-            )
-            fig.update_layout(
-                title_text=f"{title} Item",
-                title_x=0,
-                yaxis_title=None,
-                xaxis_title=None,
-                margin=dict(l=0, r=0, t=50, b=0),
-                height=400,
-            )
+            fig = create_status_pie_chart(df, f"{title} Item", color_map)
             st.plotly_chart(fig, use_container_width=True)
 
         # Second column for the metrics
         with main_col2:
-            # Create three metrics side by side
-            val_above = f"Abnormal Above {bounderies}%"
-            val_under = f"Abnormal Below -{bounderies}%"
             st.subheader(f"{title} Number")
-            if val_above in df:
-                st.metric(label=val_above, value=df[val_above])
-            else:
-                st.metric(label=val_above, value=0)
 
-            if "Normal" in df:
-                st.metric(label="Normal", value=df["Normal"])
-            else:
-                st.metric(label="Normal", value=0)
-
-            if val_under in df:
-                st.metric(label=val_under, value=df[val_under])
-            else:
-                st.metric(label=val_under, value=0)
+            # Display metrics for each status
+            for status in [f"Abnormal Above {boundaries}%", "Normal", f"Abnormal Below -{boundaries}%"]:
+                # Handle both Series and DataFrame inputs
+                if isinstance(df, pd.Series):
+                    value = df.get(status, 0) if status in df.index else 0
+                else:  # DataFrame
+                    status_row = df[df["Status"] == status] if "Status" in df.columns else None
+                    value = status_row["count"].iloc[0] if status_row is not None and not status_row.empty else 0
+                st.metric(label=status, value=value)
 
 
-def pie_char_with_total_counts_packing(df, title):
+def display_simple_pie_chart(df, title, col_ratio=None):
+    """
+    Display a simple pie chart in a container with optional column ratio.
+
+    Args:
+        df: DataFrame with destination and count columns
+        title: Chart title
+        col_ratio: Optional column ratio list
+    """
     with st.container(border=True):
-        # Create two columns for the main content
-        m = st.columns([0.5, 1, 0.5], gap="large")
+        # Create columns with the specified ratio or default
+        if col_ratio is None:
+            col_ratio = [0.5, 1, 0.5]
 
-        # First column for the pie chart
-        with m[1]:
-            fig = px.pie(df, names=df["destination"], values=df["count"])
-            fig.update_layout(
-                title_text=f"{title}",
-                title_x=0,
-                yaxis_title=None,
-                xaxis_title=None,
-                margin=dict(l=0, r=0, t=50, b=50),
-                height=400,
-            )
+        cols = st.columns(col_ratio, gap="large")
+
+        # Middle column for the pie chart
+        with cols[1]:
+            fig = px.pie(df, names="destination", values="count")
+            fig.update_layout(title_text=title, title_x=0, margin=dict(l=0, r=0, t=50, b=50), height=400)
             st.plotly_chart(fig, use_container_width=True)
 
 
-def create_pie_charts(df, boundaries):
-    # Create a grouped dataframe for the pie chart
-    status_by_destination = df.groupby(["destination", "Status"]).size().reset_index(name="count")
+def get_status_counts(df, group_by_field=None):
+    """
+    Get status counts from a DataFrame.
 
-    # Create a dictionary to store pie charts by destination
+    Args:
+        df: DataFrame with Status column
+        group_by_field: Optional field to group by before counting statuses
+
+    Returns:
+        DataFrame with status counts
+    """
+    if group_by_field:
+        return df.groupby([group_by_field, "Status"]).size().reset_index(name="count")
+    else:
+        return df.groupby("Status").size().reset_index(name="count")
+
+
+def create_status_pie_charts(df, boundaries):
+    """
+    Create multiple pie charts for each unique value in a field and an overall chart.
+
+    Args:
+        df: DataFrame with destination and Status columns
+        boundaries: Boundary percentage for abnormal values
+
+    Returns:
+        Dictionary of pie charts and the original DataFrame
+    """
+    # Define color map with dynamic boundaries
+    color_map = {
+        "Normal": "#00CC96",
+        f"Abnormal Above {boundaries}%": "#EF553B",
+        f"Abnormal Below -{boundaries}%": "#636EFA",
+    }
+
+    # Get status counts by destination
+    status_by_destination = get_status_counts(df, "destination")
+
+    # Create a dictionary to store pie charts
     pie_charts = {}
 
-    # Get unique destinations
-    destinations = df["destination"].unique()
-
-    # Create a pie chart for each destination
-    for dest in destinations:
+    # Create pie charts for each destination
+    for dest in df["destination"].unique():
         dest_data = status_by_destination[status_by_destination["destination"] == dest]
-
-        fig = px.pie(
-            dest_data,
-            values="count",
-            names="Status",
-            title=f"{dest}",
-            color="Status",
-            color_discrete_map={
-                "Normal": "#00CC96",
-                f"Abnormal Above {boundaries}%": "#EF553B",
-                f"Abnormal Below -{boundaries}%": "#636EFA",
-            },
-        )
-
-        fig.update_traces(textposition="inside", textinfo="percent+label")
+        fig = create_status_pie_chart(dest_data, f"{dest}", color_map)
         pie_charts[dest] = fig
 
-    # Also create an overall pie chart
-    overall_status = df.groupby("Status").size().reset_index(name="count")
-    overall_fig = px.pie(
-        overall_status,
-        values="count",
-        names="Status",
-        title="Overall Status Distribution",
-        color="Status",
-        color_discrete_map={
-            "Normal": "#00CC96",
-            f"Abnormal Above {boundaries}%": "#EF553B",
-            f"Abnormal Below -{boundaries}%": "#636EFA",
-        },
-    )
-    overall_fig.update_traces(textposition="inside", textinfo="percent+label")
+    # Create overall pie chart
+    overall_status = get_status_counts(df)
+    overall_fig = create_status_pie_chart(overall_status, "Overall Status Distribution", color_map)
     pie_charts["Overall"] = overall_fig
 
     return pie_charts, df
 
 
-def create_pie_chart_packing(data, destination, boundaries):
-    # Filter data for the selected destination
+def create_filtered_pie_chart(data, filter_field, filter_value, boundaries):
+    """
+    Create a pie chart for a filtered subset of data.
 
-    filtered_data = data[data["destination"] == destination]
-    title = f"{destination} Abnormal Number"
+    Args:
+        data: DataFrame with Status column
+        filter_field: Field name to filter on
+        filter_value: Value to filter for
+        boundaries: Boundary percentage for abnormal values
 
-    # Count occurrences of each status
+    Returns:
+        Plotly figure object
+    """
+    # Filter data
+    filtered_data = data[data[filter_field] == filter_value]
+
+    # Get status counts
     status_counts = filtered_data["Status"].value_counts().reset_index()
     status_counts.columns = ["Status", "count"]
 
-    # Create pie chart
-    fig = px.pie(
-        status_counts,
-        values="count",
-        names="Status",
-        title=title,
-        color="Status",
-        color_discrete_map={
-            "Normal": "#00CC96",
-            f"Abnormal Above {boundaries}%": "#EF553B",
-            f"Abnormal Below -{boundaries}%": "#636EFA",
-        },
-    )
+    # Define color map with dynamic boundaries
+    color_map = {
+        "Normal": "#00CC96",
+        f"Abnormal Above {boundaries}%": "#EF553B",
+        f"Abnormal Below -{boundaries}%": "#636EFA",
+    }
 
-    fig.update_traces(textposition="inside", textinfo="percent+label")
-    return fig
+    # Create and return the pie chart
+    return create_status_pie_chart(status_counts, f"{filter_value} Abnormal Number", color_map)
+
+
+# Specific wrapper functions that use the core functions above
+def create_pie_chart_packing(data, destination, boundaries):
+    return create_filtered_pie_chart(data, "destination", destination, boundaries)
 
 
 def create_pie_chart_out_house(data, source, boundaries):
-    # Filter data for the selected destination
+    return create_filtered_pie_chart(data, "source", source, boundaries)
 
-    filtered_data = data[data["source"] == source]
-    title = f"{source} Abnormal Number"
 
-    # Count occurrences of each status
-    status_counts = filtered_data["Status"].value_counts().reset_index()
-    status_counts.columns = ["Status", "count"]
+def pie_char_with_total_counts(df, title, boundaries):
+    display_pie_with_metrics(df, title, boundaries)
 
-    # Create pie chart
-    fig = px.pie(
-        status_counts,
-        values="count",
-        names="Status",
-        title=title,
-        color="Status",
-        color_discrete_map={
-            "Normal": "#00CC96",
-            f"Abnormal Above {boundaries}%": "#EF553B",
-            f"Abnormal Below -{boundaries}%": "#636EFA",
-        },
-    )
 
-    fig.update_traces(textposition="inside", textinfo="percent+label")
-    return fig
+def pie_char_with_total_counts_packing(df, title):
+    display_simple_pie_chart(df, title)
+
+
+def create_pie_charts(df, boundaries):
+    return create_status_pie_charts(df, boundaries)

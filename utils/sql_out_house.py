@@ -1,12 +1,3 @@
-import pandas as pd
-import psycopg2
-import psycopg2.extras
-import uuid
-
-# Register UUID type with psycopg2
-psycopg2.extras.register_uuid()
-
-
 def status_product_two_year_out_house(years):
     query_status = """
     WITH dataframe AS (
@@ -83,106 +74,123 @@ def abnormal_cal_out_house(years, boundaries):
     return abnomal_cal
 
 
-def import_data(conn, df):
-    df["part_no"] = df["part_no"].astype(str)
+def abnormal_cal_out_house_per_part(years):
+    q_abnormal = """
+    WITH 
+    dataframe AS (
+        SELECT
+        LEFT(o.part_no, 5) AS "part_num",
+        o.part_no,
+        o.part_name,
+        oh.price,
+        oh.source,
+        oh.year_item
+        FROM
+        out_house o
+        JOIN out_house_detail oh ON o.id = oh.out_house_item
+        WHERE
+        oh.year_item IN ({years})
+    ),
+    
+    price_changes AS (
+        SELECT
+        d1.part_num,
+        d1.part_no,
+        d1.part_name,
+        d1.source,
+        d1.price AS "price_{year1}",
+        d2.price AS "price_{year2}",
+        ROUND(((d2.price - d1.price) / NULLIF(d1.price, 0)) * 100, 2) AS "price_gap_percent"
+        FROM
+        dataframe d1
+        JOIN dataframe d2 ON d1.part_no = d2.part_no
+        WHERE
+        d1.year_item = {year1}
+        AND d2.year_item = {year2}
+    ),
+    
+    part_counts AS (
+        SELECT 
+        part_num, 
+        COUNT(*) AS record_count
+        FROM 
+        price_changes
+        GROUP BY 
+        part_num
+    ),
+    
+    valid_parts AS (
+        SELECT 
+        part_num
+        FROM 
+        part_counts
+        WHERE 
+        record_count > 1
+    ),
+    
+    group_stats AS (
+        SELECT
+        pc.part_num,
+        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY price_gap_percent) AS q1,
+        PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY price_gap_percent) AS median,
+        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY price_gap_percent) AS q3
+        FROM 
+        price_changes pc
+        JOIN
+        valid_parts vp ON pc.part_num = vp.part_num
+        GROUP BY
+        pc.part_num
+    ),
+    
+    iqr_analysis AS (
+        SELECT
+        pc.part_num,
+        pc.part_no,
+        pc.part_name,
+        pc.source,
+        pc.price_{year1},
+        pc.price_{year2},
+        pc.price_gap_percent,
+        gs.q1,
+        gs.median,
+        gs.q3,
+        (gs.q3 - gs.q1) AS iqr,
+        (gs.q1 - 1.5 * (gs.q3 - gs.q1)) AS lower_bound,
+        (gs.q3 + 1.5 * (gs.q3 - gs.q1)) AS upper_bound
+        FROM 
+        price_changes pc
+        JOIN 
+        group_stats gs ON pc.part_num = gs.part_num
+    )
+    
+    SELECT
+    part_num,
+    part_no,
+    part_name,
+    source,
+    price_{year1},
+    price_{year2},
+    price_gap_percent,
+    q1,
+    median,
+    q3,
+    iqr,
+    lower_bound,
+    upper_bound,
+    CASE
+        WHEN price_gap_percent < lower_bound THEN 'Abnormally Low'
+        WHEN price_gap_percent > upper_bound THEN 'Abnormally High'
+        ELSE 'Normal'
+    END AS price_status
+    --   CASE
+    --     WHEN price_gap_percent < lower_bound THEN price_gap_percent - lower_bound
+    --     WHEN price_gap_percent > upper_bound THEN price_gap_percent - upper_bound
+    --     ELSE 0
+    --   END AS deviation_from_normal_range
+    FROM 
+    iqr_analysis
+    ORDER BY
+    part_num
+    """.format(years=",".join(map(str, years)), year1=years[0], year2=years[1])
 
-    try:
-        cursor = conn.cursor()
-
-        for index, row in df.iterrows():
-            try:
-                part_no = row["part_no"]
-                part_name = row["part_name"]
-                price = round(row["price_curr"], 0)
-                source = row["source"]
-                year = row["Year"]
-                explanation = row.get("Explanation", None)
-
-                # Check if part_no exists in out_house
-                cursor.execute(
-                    """
-                    SELECT id FROM out_house WHERE part_no = %s
-                    """,
-                    (part_no,),
-                )
-                out_house_result = cursor.fetchone()
-
-                if out_house_result:
-                    out_house_id = out_house_result[0]
-                else:
-                    # Insert new out_house record
-                    out_house_id = uuid.uuid4()
-                    cursor.execute(
-                        """
-                        INSERT INTO out_house (id, part_no, part_name)
-                        VALUES (%s, %s, %s)
-                        """,
-                        (out_house_id, part_no, part_name),
-                    )
-
-                # Check if out_house_detail for same year + source exists
-                cursor.execute(
-                    """
-                    SELECT id, price FROM out_house_detail
-                    WHERE out_house_item = %s AND year_item = %s AND source = %s
-                    """,
-                    (out_house_id, year, source),
-                )
-                detail_result = cursor.fetchone()
-
-                explanation_must_exist = False  # flag if we force explanation insert after update
-
-                if detail_result:
-                    out_house_detail_id, existing_price = detail_result
-
-                    if existing_price != price:
-                        # Update price if different
-                        cursor.execute(
-                            """
-                            UPDATE out_house_detail
-                            SET price = %s
-                            WHERE id = %s
-                            """,
-                            (price, out_house_detail_id),
-                        )
-                        explanation_must_exist = True  # explanation required after price update
-                    # No price update if it matches — explanation still allowed
-
-                else:
-                    # Insert new out_house_detail if no matching record
-                    cursor.execute(
-                        """
-                        INSERT INTO out_house_detail (out_house_item, price, source, year_item, created_at)
-                        VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
-                        RETURNING id
-                        """,
-                        (out_house_id, price, source, year),
-                    )
-                    out_house_detail_id = cursor.fetchone()[0]
-                    explanation_must_exist = True  # explanation required for new detail
-
-                # Explanation handling - always insert if present or if explanation must exist
-                if explanation or explanation_must_exist:
-                    if explanation is None:
-                        explanation = ""
-
-                    cursor.execute(
-                        """
-                        INSERT INTO out_house_explanations (out_house_detail_id, explanation, explained_at)
-                        VALUES (%s, %s, CURRENT_TIMESTAMP)
-                        """,
-                        (out_house_detail_id, explanation),
-                    )
-
-                conn.commit()
-
-            except Exception as e:
-                print(f"Error processing row {index + 1}: {e}")
-                conn.rollback()
-
-    except Exception as e:
-        print(f"Database connection error: {e}")
-
-    finally:
-        cursor.close()
-        conn.close()
+    return q_abnormal

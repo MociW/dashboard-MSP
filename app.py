@@ -11,441 +11,403 @@ import utils.sql_out_house as uo
 import utils.visualize as uv
 import utils.formatting as uf
 
+# Page configuration
 st.set_page_config(page_title="TMMIN PBMD - Dashboard", layout="wide")
 st.image("images/toyota.png", width=250)
-st.header("DASHBOARD ABNORMALITY MANAGEMENT  - PBMD")
+st.header("DASHBOARD ABNORMALITY MANAGEMENT - PBMD")
 
 
-with open("config.yaml", "r", encoding="utf-8") as file:
-    config = yaml.load(file, Loader=SafeLoader)
+# Authentication setup
+@st.cache_resource
+def load_config():
+    with open("config.yaml", "r", encoding="utf-8") as file:
+        return yaml.load(file, Loader=SafeLoader)
 
+
+config = load_config()
 authenticator = stauth.Authenticate(
     config["credentials"], config["cookie"]["name"], config["cookie"]["key"], config["cookie"]["expiry_days"]
 )
 
+# Handle login
 try:
     authenticator.login()
 except LoginError as e:
     st.error(e)
 
-
+# Authentication status checking
 if st.session_state["authentication_status"]:
-    m = st.columns((1, 0.08))
-    with m[0]:
+    col1, col2 = st.columns([0.92, 0.08])
+    with col1:
         st.subheader(f"Welcome {st.session_state['name']}")
-    with m[1]:
+    with col2:
         authenticator.logout()
 elif st.session_state["authentication_status"] is False:
     st.error("Username/password is incorrect")
+    st.stop()
 elif st.session_state["authentication_status"] is None:
     st.warning("Please enter your username and password")
+    st.stop()
 
+# Database connection
 conn = st.connection("postgresql", type="sql")
 
-# ======================================== FORM ========================================
-if st.session_state["authentication_status"]:
-    with st.form(key="form_input"):
-        m7, m8 = st.columns((1, 1))
-        m3, m4, m5 = st.columns((1, 1, 1))
-        input_current_year = m8.text_input("Input Current Year")
-        input_previous_year = m7.text_input("Input Previous Year")
-        input_abnormal = m3.text_input("Abnormal Boundaries (%)")
-        submitButton = st.form_submit_button(label="Submit")
+# Input form
+with st.form(key="form_input"):
+    col1, col2 = st.columns(2)
+    input_previous_year = col1.text_input("Input Previous Year")
+    input_current_year = col2.text_input("Input Current Year")
 
-        if submitButton:
-            st.session_state["years"] = [input_previous_year, input_current_year]
-            st.session_state["input_abnormal"] = input_abnormal
+    input_abnormal = st.text_input("Abnormal Boundaries (%)")
+    submit_button = st.form_submit_button(label="Submit")
+
+    if submit_button:
+        st.session_state["years"] = [input_previous_year, input_current_year]
+        st.session_state["input_abnormal"] = input_abnormal
+
+# Check if required session state data exists
+if not all(key in st.session_state for key in ["years", "input_abnormal"]):
+    st.warning("Please submit the form above to continue")
+    st.stop()
+
+# Extract common values
+years = st.session_state["years"]
+input_abnormal = st.session_state["input_abnormal"]
+input_previous_year, input_current_year = years
+
+
+# Function to display status metrics
+def display_status_metrics(status_data):
+    m = st.columns(3, gap="small")
+    for i, status in enumerate(["Deleted", "Remain", "New"]):
+        with m[i]:
+            value = status_data.get(status, 0)
+            st.metric(label=status, value=value)
+
+
+# Function to generate and display download buttons
+def display_download_buttons(full_excel, filtered_excel, section_name):
+    cols = st.columns(2, border=True)
+    with cols[0]:
+        st.subheader("Full Excel")
+        st.download_button(
+            label="Download Excel File",
+            data=full_excel,
+            file_name=f"{section_name}_{input_previous_year}_{input_current_year}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    with cols[1]:
+        st.subheader("Filtered Excel")
+        st.download_button(
+            label="Download Excel File",
+            data=filtered_excel,
+            file_name=f"{section_name}_filtered_{input_previous_year}_{input_current_year}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+
 
 # ======================================== IN HOUSE ========================================
-if "years" in st.session_state and "input_abnormal" in st.session_state and st.session_state["authentication_status"]:
-    st.header("IN HOUSE")
+st.header("IN HOUSE")
 
-    years = st.session_state["years"]
-    input_abnormal = st.session_state["input_abnormal"]
 
-    status_items = us.status_product_two_year(years)
-    status_items_impl = conn.query(status_items, ttl="15m")
-    status_items_impl = status_items_impl["Status"].value_counts()
+# Cache query results to prevent redundant database calls
+@st.cache_data(ttl="15m")
+def get_in_house_data(years, abnormal_threshold):
+    status_items = conn.query(us.status_product_two_year(years))
+    abnormal_cal = conn.query(us.abnormal_cal(years, abnormal_threshold))
+    full_abnormal_cal = conn.query(us.full_abnormal_cal(years, abnormal_threshold))
+    return status_items, abnormal_cal, full_abnormal_cal
 
-    # --------------------------------------- Abnormal Calculation ---------------------------------------
-    abnormal_cal = us.abnormal_cal(years, input_abnormal)
-    abnormal_cal_impl = conn.query(abnormal_cal, ttl="15m")
-    abnormal_cal_num = abnormal_cal_impl["Status Abnormal"].value_counts()
 
-    full_abnormal_cal = us.full_abnormal_cal(years, input_abnormal)
-    full_abnormal_cal_impl = conn.query(full_abnormal_cal, ttl="15m")
-    lva_abnormal_number = full_abnormal_cal_impl["LVA Status"].value_counts()
-    non_lva_abnormal_number = full_abnormal_cal_impl["Non LVA Status"].value_counts()
-    tooling_abnormal_nummber = full_abnormal_cal_impl["Tooling Status"].value_counts()
-    process_cost_abnormal_number = full_abnormal_cal_impl["Process Cost Status"].value_counts()
-    total_cost_abnormal_number = full_abnormal_cal_impl["Total Cost Status"].value_counts()
+# Get in-house data
+status_items_impl, abnormal_cal_impl, full_abnormal_cal_impl = get_in_house_data(years, input_abnormal)
 
-    # --------------------------------------- Generate Excel ---------------------------------------
-    df_generate = abnormal_cal_impl.drop("Status Abnormal", axis=1)
-    generate_excel = uf.convert_to_excel_in_house(
-        df_generate, input_previous_year, input_current_year, int(input_abnormal)
-    )
+# Process data
+status_items_counts = status_items_impl["Status"].value_counts()
+abnormal_cal_counts = abnormal_cal_impl["Status Abnormal"].value_counts()
 
-    abnormal_cal_impl_filtered = abnormal_cal_impl[abnormal_cal_impl["Status Abnormal"] == "Abnormal"]
-    abnormal_cal_impl_filtered = abnormal_cal_impl_filtered.drop("Status Abnormal", axis=1)
-    generate_excel_filtered = uf.convert_to_excel_in_house(
-        abnormal_cal_impl_filtered, input_previous_year, input_current_year, int(input_abnormal)
-    )
+# Process abnormal data categories
+abnormal_categories = {
+    "LVA Status": full_abnormal_cal_impl["LVA Status"].value_counts(),
+    "Non LVA Status": full_abnormal_cal_impl["Non LVA Status"].value_counts(),
+    "Tooling Status": full_abnormal_cal_impl["Tooling Status"].value_counts(),
+    "Process Cost Status": full_abnormal_cal_impl["Process Cost Status"].value_counts(),
+    "Total Cost Status": full_abnormal_cal_impl["Total Cost Status"].value_counts(),
+}
 
-    mc = st.columns(2, border=True)
-    with mc[0]:
-        st.subheader("Item Status")
-        m = st.columns(3, gap="small")
-        with m[0]:
-            if "Deleted" in status_items_impl:
-                st.metric(label="Deleted", value=status_items_impl["Deleted"])
-            else:
-                st.metric(label="Deleted", value=0)
+# Generate Excel files
+df_generate = abnormal_cal_impl.drop("Status Abnormal", axis=1)
+generate_excel = uf.convert_to_excel_in_house(df_generate, input_previous_year, input_current_year, int(input_abnormal))
 
-        with m[1]:
-            if "Remain" in status_items_impl:
-                st.metric(label="Remain", value=status_items_impl["Remain"])
-            else:
-                st.metric(label="Remain", value=0)
+abnormal_filtered = abnormal_cal_impl[abnormal_cal_impl["Status Abnormal"] == "Abnormal"].drop(
+    "Status Abnormal", axis=1
+)
+generate_excel_filtered = uf.convert_to_excel_in_house(
+    abnormal_filtered, input_previous_year, input_current_year, int(input_abnormal)
+)
 
-        with m[2]:
-            if "New" in status_items_impl:
-                st.metric(label="New", value=status_items_impl["New"])
-            else:
-                st.metric(label="New", value=0)
+# Display metrics
+mc = st.columns(2, border=True)
+with mc[0]:
+    st.subheader("Item Status")
+    display_status_metrics(status_items_counts)
 
-    with mc[1]:
-        st.subheader("Abnormal Number")
-        m = st.columns(2, gap="small")
-        with m[0]:
-            val_above = "Abnormal"
-            if val_above in abnormal_cal_num:
-                st.metric(label=val_above, value=abnormal_cal_num[val_above])
-            else:
-                st.metric(label=val_above, value=0)
-
-        with m[1]:
-            if "Normal" in abnormal_cal_num:
-                st.metric(label="Normal", value=abnormal_cal_num["Normal"])
-            else:
-                st.metric(label="Normal", value=0)
-
-    uv.pie_char_with_total_counts(total_cost_abnormal_number, "Total Cost Abnormal", input_abnormal)
-    uv.pie_char_with_total_counts(lva_abnormal_number, "LVA Abnormal", input_abnormal)
-    uv.pie_char_with_total_counts(non_lva_abnormal_number, "Non LVA Abnormal", input_abnormal)
-    uv.pie_char_with_total_counts(tooling_abnormal_nummber, "Tooling Abnormal", input_abnormal)
-    uv.pie_char_with_total_counts(process_cost_abnormal_number, "Process Cost Abnormal", input_abnormal)
-
-    m = st.columns(2, border=True)
+with mc[1]:
+    st.subheader("Abnormal Number")
+    m = st.columns(2, gap="small")
     with m[0]:
-        st.subheader("Full Excel")
-        st.download_button(
-            label="Download Excel File",
-            data=generate_excel,
-            file_name=f"in_house_{input_previous_year}_{input_current_year}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-
+        val_above = "Abnormal"
+        st.metric(label=val_above, value=abnormal_cal_counts.get(val_above, 0))
     with m[1]:
-        st.subheader("Filtered Excel")
-        st.download_button(
-            label="Download Excel File",
-            data=generate_excel_filtered,
-            file_name=f"in_house_filtered_{input_previous_year}_{input_current_year}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+        st.metric(label="Normal", value=abnormal_cal_counts.get("Normal", 0))
+
+# Display pie charts for all categories
+for category_name, category_data in abnormal_categories.items():
+    uv.pie_char_with_total_counts(category_data, category_name, input_abnormal)
+
+# Display download buttons
+display_download_buttons(generate_excel, generate_excel_filtered, "in_house")
 
 # ======================================== OUT HOUSE ========================================
-if "years" in st.session_state and "input_abnormal" in st.session_state and st.session_state["authentication_status"]:
-    st.divider()
-    st.header("OUT HOUSE")
+st.divider()
+st.header("OUT HOUSE")
 
-    years = st.session_state["years"]
-    input_abnormal = st.session_state["input_abnormal"]
 
-    status_items = uo.status_product_two_year_out_house(years)
-    status_items_impl = conn.query(status_items, ttl="15m")
-    status_items_impl = status_items_impl["Status"].value_counts()
+# Cache query results for out house data
+@st.cache_data(ttl="15m")
+def get_out_house_data(years, abnormal_threshold):
+    status_items = conn.query(uo.status_product_two_year_out_house(years))
+    abnormal_cal = conn.query(uo.abnormal_cal_out_house(years, abnormal_threshold))
+    abnormal_cal_per_part = conn.query(uo.abnormal_cal_out_house_per_part(years))
+    return status_items, abnormal_cal, abnormal_cal_per_part
 
-    abnormal_cal_out_house = uo.abnormal_cal_out_house(years, input_abnormal)
-    abnormal_cal_out_house_impl = conn.query(abnormal_cal_out_house, ttl="15m")
-    abnormal_cal_out_house_num = abnormal_cal_out_house_impl["Status"].value_counts()
 
-    df_generate_out = abnormal_cal_out_house_impl.drop("Status", axis=1)
-    generate_excel_out = uf.convert_to_excel_format_out_house(
-        df_generate_out, input_previous_year, input_current_year, int(input_abnormal)
+# Get out house data
+status_items_out, abnormal_cal_out, abnormal_cal_per_part_out = get_out_house_data(years, input_abnormal)
+
+# Process data
+status_counts_out = status_items_out["Status"].value_counts()
+abnormal_counts_out = abnormal_cal_out["Status"].value_counts()
+
+# Generate Excel files
+df_generate_out = abnormal_cal_out.drop("Status", axis=1)
+generate_excel_out = uf.convert_to_excel_format_out_house(
+    df_generate_out, input_previous_year, input_current_year, int(input_abnormal)
+)
+
+# Filter for abnormal items
+abnormal_filter = (abnormal_cal_out["Status"] == f"Abnormal Above {input_abnormal}%") | (
+    abnormal_cal_out["Status"] == f"Abnormal Below -{input_abnormal}%"
+)
+abnormal_filtered_out = abnormal_cal_out[abnormal_filter].drop("Status", axis=1)
+generate_excel_filtered_out = uf.convert_to_excel_format_out_house(
+    abnormal_filtered_out, input_previous_year, input_current_year, int(input_abnormal)
+)
+
+generate_excel_per_part = uf.convert_to_excel_format_out_house_per_part(
+    abnormal_cal_per_part_out, input_previous_year, input_current_year, int(input_abnormal)
+)
+
+
+# Display metrics
+mc = st.columns(2, border=True)
+with mc[0]:
+    st.subheader("Item Status")
+    display_status_metrics(status_counts_out)
+
+with mc[1]:
+    st.subheader("Abnormal Number")
+    m = st.columns(3, gap="small")
+    statuses = [f"Abnormal Above {input_abnormal}%", "Normal", f"Abnormal Below -{input_abnormal}%"]
+    for i, status in enumerate(statuses):
+        with m[i]:
+            st.metric(label=status, value=abnormal_counts_out.get(status, 0))
+
+# Display pie chart
+with st.container(border=True):
+    pastel_colors = px.colors.qualitative.Pastel
+    fig = px.pie(
+        abnormal_counts_out,
+        values=abnormal_counts_out.values,
+        names=abnormal_counts_out.index,
+        title="Out House Cost Abnormality Distribution",
+        color=abnormal_counts_out.index,
+        color_discrete_map={
+            "Normal": pastel_colors[0],
+            f"Abnormal Above {input_abnormal}%": pastel_colors[1],
+            f"Abnormal Below -{input_abnormal}%": pastel_colors[2],
+        },
     )
+    fig.update_traces(textposition="inside", textinfo="percent+label")
+    st.plotly_chart(fig, use_container_width=True)
 
-    abnormal_cal_impl_filtered_out = abnormal_cal_out_house_impl[
-        (abnormal_cal_out_house_impl["Status"] == f"Abnormal Above {input_abnormal}%")
-        | (abnormal_cal_out_house_impl["Status"] == f"Abnormal Below -{input_abnormal}%")
-    ]
-    abnormal_cal_impl_filtered_out = abnormal_cal_impl_filtered_out.drop("Status", axis=1)
-    generate_excel_filtered_out = uf.convert_to_excel_format_out_house(
-        abnormal_cal_impl_filtered_out, input_previous_year, input_current_year, int(input_abnormal)
+# Display top 10 tables
+n = st.columns(2, border=True)
+with n[0]:
+    st.subheader(f"Top 10 Above {input_abnormal}%")
+    top_10_above = abnormal_cal_out.dropna(subset=["Gap Price"]).drop("Status", axis=1, errors="ignore").head(10)
+    st.dataframe(top_10_above)
+
+with n[1]:
+    st.subheader(f"Top 10 Below -{input_abnormal}%")
+    top_10_below = (
+        abnormal_cal_out.dropna(subset=["Gap Price"])
+        .drop("Status", axis=1, errors="ignore")
+        .sort_values("Gap Price")
+        .head(10)
     )
+    st.dataframe(top_10_below)
 
-    mc = st.columns(2, border=True)
-    with mc[0]:
-        st.subheader("Item Status")
-        m = st.columns(3, gap="small")
-        with m[0]:
-            if "Deleted" in status_items_impl:
-                st.metric(label="Deleted", value=status_items_impl["Deleted"])
-            else:
-                st.metric(label="Deleted", value=0)
+# Source selection
+with st.container(border=True):
+    st.subheader("Abnormal Number Per Source")
+    sources = sorted(abnormal_cal_out["source"].unique())
 
-        with m[1]:
-            if "Remain" in status_items_impl:
-                st.metric(label="Remain", value=status_items_impl["Remain"])
-            else:
-                st.metric(label="Remain", value=0)
-
-        with m[2]:
-            if "New" in status_items_impl:
-                st.metric(label="New", value=status_items_impl["New"])
-            else:
-                st.metric(label="New", value=0)
-
-    with mc[1]:
-        st.subheader("Abnormal Number")
-        m = st.columns(3, gap="small")
-        with m[0]:
-            val_above = f"Abnormal Above {input_abnormal}%"
-            if val_above in abnormal_cal_out_house_num:
-                st.metric(label=val_above, value=abnormal_cal_out_house_num[val_above])
-            else:
-                st.metric(label=val_above, value=0)
-
-        with m[1]:
-            if "Normal" in abnormal_cal_out_house_num:
-                st.metric(label="Normal", value=abnormal_cal_out_house_num["Normal"])
-            else:
-                st.metric(label="Normal", value=0)
-
-        with m[2]:
-            val_under = f"Abnormal Below -{input_abnormal}%"
-            if val_under in abnormal_cal_out_house_num:
-                st.metric(label=val_under, value=abnormal_cal_out_house_num[val_under])
-            else:
-                st.metric(label=val_under, value=0)
-
-    with st.container(border=True):
-        pastel_colors = px.colors.qualitative.Pastel
-        fig = px.pie(
-            abnormal_cal_out_house_num,
-            values=abnormal_cal_out_house_num.values,
-            names=abnormal_cal_out_house_num.index,
-            title="Out House Cost Abnormality Distribution",
-            color=abnormal_cal_out_house_num.index,
-            color_discrete_map={
-                "Normal": pastel_colors[0],
-                f"Abnormal Above {input_abnormal}%": pastel_colors[1],
-                f"Abnormal Below -{input_abnormal}%": pastel_colors[2],
-            },
-        )
-
-        fig.update_traces(textposition="inside", textinfo="percent+label")
-        st.plotly_chart(fig, use_container_width=True)
-
-    n = st.columns(2, border=True)
-    with n[0]:
-        st.subheader(f"Top 10 Above {input_abnormal}%")
-        dataframe_out_house_above = abnormal_cal_out_house_impl.dropna(subset=["Gap Price"])
-        dataframe_out_house_above = dataframe_out_house_above.drop("Status", axis=1, errors="ignore")
-        st.dataframe(dataframe_out_house_above.head(10))
-
-    with n[1]:
-        st.subheader(f"Top 10 Below -{input_abnormal}%")
-        dataframe_out_house_below = abnormal_cal_out_house_impl.dropna(subset=["Gap Price"])
-        dataframe_out_house_below = dataframe_out_house_below.drop("Status", axis=1, errors="ignore")
-        dataframe_out_house_below = dataframe_out_house_below.sort_values("Gap Price")
-        st.dataframe(dataframe_out_house_below.head(10))
-
+    # Initialize session state if needed
     if "selected_source" not in st.session_state:
-        st.session_state["selected_source"] = abnormal_cal_out_house_impl["source"].unique()[0]
+        st.session_state["selected_source"] = sources[0] if sources else ""
 
-    with st.container(border=True):
-        st.subheader("Abnormal Number Per Source")
-        sources = sorted(abnormal_cal_out_house_impl["source"].unique())
-        selected_source = st.selectbox("Choose a destination:", sources, index=0)
+    selected_source = st.selectbox(
+        "Choose a destination:", sources, index=sources.index(st.session_state["selected_source"])
+    )
+    st.session_state["selected_source"] = selected_source
 
-        # Store selection in session state
-        if selected_source:
-            st.session_state["selected_source"] = selected_source
-
-        # Generate and display pie chart
-        chart = uv.create_pie_chart_out_house(
-            abnormal_cal_out_house_impl, st.session_state["selected_source"], input_abnormal
-        )
+    # Create and display chart
+    if selected_source:
+        chart = uv.create_pie_chart_out_house(abnormal_cal_out, selected_source, input_abnormal)
         st.plotly_chart(chart, use_container_width=True)
 
-        # Display statistics
-        filtered_data = abnormal_cal_out_house_impl[
-            abnormal_cal_out_house_impl["source"] == st.session_state["selected_source"]
-        ]
+        # Calculate and display statistics
+        filtered_data = abnormal_cal_out[abnormal_cal_out["source"] == selected_source]
         total_items_oh = len(filtered_data)
-        normal_count_oh = filtered_data[filtered_data["Status"] == "Normal"].shape[0]
-        abnormal_above_oh = filtered_data[filtered_data["Status"] == f"Abnormal Above {input_abnormal}%"].shape[0]
-        abnormal_below_oh = filtered_data[filtered_data["Status"] == f"Abnormal Below -{input_abnormal}%"].shape[0]
 
-    with st.container(border=True):
-        st.subheader(f"{st.session_state['selected_source']} Summary Statistics")
-        stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
-        stat_col1.metric("Total Items", total_items_oh)
-        stat_col2.metric("Normal", f"{normal_count_oh} ({normal_count_oh / total_items_oh * 100:.1f}%)")
-        stat_col3.metric("Above Threshold", f"{abnormal_above_oh} ({abnormal_above_oh / total_items_oh * 100:.1f}%)")
-        stat_col4.metric("Below Threshold", f"{abnormal_below_oh} ({abnormal_below_oh / total_items_oh * 100:.1f}%)")
+        if total_items_oh > 0:
+            normal_count_oh = filtered_data[filtered_data["Status"] == "Normal"].shape[0]
+            abnormal_above_oh = filtered_data[filtered_data["Status"] == f"Abnormal Above {input_abnormal}%"].shape[0]
+            abnormal_below_oh = filtered_data[filtered_data["Status"] == f"Abnormal Below -{input_abnormal}%"].shape[0]
 
-    m = st.columns(3, border=True)
-    with m[0]:
-        st.subheader("Full Excel")
-        st.download_button(
-            label="Download Excel File",
-            data=generate_excel_out,
-            file_name=f"out_house_{input_previous_year}_{input_current_year}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+with st.container(border=True):
+    st.subheader(f"{selected_source} Summary Statistics")
+    cols = st.columns(4)
+    cols[0].metric("Total Items", total_items_oh)
+    cols[1].metric("Normal", f"{normal_count_oh} ({normal_count_oh / total_items_oh * 100:.1f}%)")
+    cols[2].metric("Above Threshold", f"{abnormal_above_oh} ({abnormal_above_oh / total_items_oh * 100:.1f}%)")
+    cols[3].metric("Below Threshold", f"{abnormal_below_oh} ({abnormal_below_oh / total_items_oh * 100:.1f}%)")
 
-    with m[1]:
-        st.subheader("Filtered Excel")
-        st.download_button(
-            label="Download Excel File",
-            data=generate_excel_filtered_out,
-            file_name=f"out_house_filtered_{input_previous_year}_{input_current_year}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-
-    with m[2]:
-        st.subheader("")
+# Display download buttons
+section_name = "out_house"
+cols = st.columns(3, border=True)
+with cols[0]:
+    st.subheader("Full Excel")
+    st.download_button(
+        label="Download Excel File",
+        data=generate_excel_out,
+        file_name=f"{section_name}_{input_previous_year}_{input_current_year}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+with cols[1]:
+    st.subheader("Filtered Excel")
+    st.download_button(
+        label="Download Excel File",
+        data=generate_excel_filtered_out,
+        file_name=f"{section_name}_filtered_{input_previous_year}_{input_current_year}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+with cols[2]:
+    st.subheader("Filtered Excel")
+    st.download_button(
+        label="Download Excel File",
+        data=generate_excel_per_part,
+        file_name=f"{section_name}_per_part_{input_previous_year}_{input_current_year}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 # ======================================== PACKING ========================================
-if "years" in st.session_state and "input_abnormal" in st.session_state and st.session_state["authentication_status"]:
-    years = st.session_state["years"]
-    input_abnormal = st.session_state["input_abnormal"]
+st.divider()
+st.header("PACKING")
 
-    st.divider()
-    st.header("PACKING")
 
-    status_items = up.status_product_two_year(years)
-    status_items_impl = conn.query(status_items, ttl="15m")
-    status_items_impl = status_items_impl["Status"].value_counts()
+# Cache query results for packing data
+@st.cache_data(ttl="15m")
+def get_packing_data(years, abnormal_threshold):
+    status_items = conn.query(up.status_product_two_year(years))
+    abnormal_cal = conn.query(up.packing_max_abnormal_cal(years, abnormal_threshold))
+    return status_items, abnormal_cal
 
-    abnormal_cal_packing = up.packing_max_abnormal_cal(years, input_abnormal)
-    abnormal_cal_packing_impl = conn.query(abnormal_cal_packing, ttl="15m")
-    abnormal_cal_packing_num = abnormal_cal_packing_impl["Status"].value_counts()
 
-    st.dataframe(abnormal_cal_packing_impl)
+# Get packing data
+status_items_packing, abnormal_cal_packing = get_packing_data(years, input_abnormal)
 
-    df_generate_packing = abnormal_cal_packing_impl.drop("Status", axis=1)
-    generate_excel_packing = uf.convert_to_excel_format_packaging(
-        abnormal_cal_packing_impl, input_previous_year, input_current_year, int(input_abnormal)
-    )
+# Process data
+status_counts_packing = status_items_packing["Status"].value_counts()
+abnormal_counts_packing = abnormal_cal_packing["Status"].value_counts()
 
-    abnormal_cal_impl_filtered_packing = abnormal_cal_packing_impl[
-        (abnormal_cal_packing_impl["Status"] == f"Abnormal Above {input_abnormal}%")
-        | (abnormal_cal_packing_impl["Status"] == f"Abnormal Below {input_abnormal}%")
-    ]
+# Generate Excel files
+generate_excel_packing = uf.convert_to_excel_format_packaging(
+    abnormal_cal_packing, input_previous_year, input_current_year, int(input_abnormal)
+)
 
-    generate_excel_filtered_packing = uf.convert_to_excel_format_packaging(
-        abnormal_cal_impl_filtered_packing, input_previous_year, input_current_year, int(input_abnormal)
-    )
+abnormal_filter_packing = (abnormal_cal_packing["Status"] == f"Abnormal Above {input_abnormal}%") | (
+    abnormal_cal_packing["Status"] == f"Abnormal Below {input_abnormal}%"
+)
+abnormal_filtered_packing = abnormal_cal_packing[abnormal_filter_packing]
+generate_excel_filtered_packing = uf.convert_to_excel_format_packaging(
+    abnormal_filtered_packing, input_previous_year, input_current_year, int(input_abnormal)
+)
 
-    mc = st.columns(2, border=True)
-    with mc[0]:
-        st.subheader("Item Status")
-        m = st.columns(3, gap="small")
-        with m[0]:
-            if "Deleted" in status_items_impl:
-                st.metric(label="Deleted", value=status_items_impl["Deleted"])
-            else:
-                st.metric(label="Deleted", value=0)
+# Display metrics
+mc = st.columns(2, border=True)
+with mc[0]:
+    st.subheader("Item Status")
+    display_status_metrics(status_counts_packing)
 
-        with m[1]:
-            if "Remain" in status_items_impl:
-                st.metric(label="Remain", value=status_items_impl["Remain"])
-            else:
-                st.metric(label="Remain", value=0)
+with mc[1]:
+    st.subheader("Abnormal Number")
+    m = st.columns(3, gap="small")
+    statuses = [f"Abnormal Above {input_abnormal}%", "Normal", f"Abnormal Below -{input_abnormal}%"]
+    for i, status in enumerate(statuses):
+        with m[i]:
+            st.metric(label=status, value=abnormal_counts_packing.get(status, 0))
 
-        with m[2]:
-            if "New" in status_items_impl:
-                st.metric(label="New", value=status_items_impl["New"])
-            else:
-                st.metric(label="New", value=0)
-    with mc[1]:
-        st.subheader("Abnormal Number")
-        m = st.columns(3, gap="small")
-        with m[0]:
-            val_above = f"Abnormal Above {input_abnormal}%"
-            if val_above in abnormal_cal_packing_num:
-                st.metric(label=val_above, value=abnormal_cal_packing_num[val_above])
-            else:
-                st.metric(label=val_above, value=0)
+# Destination selection
+with st.container(border=True):
+    st.subheader("Abnormal Number Per Destination")
+    destinations = sorted(abnormal_cal_packing["destination"].unique())
 
-        with m[1]:
-            if "Normal" in abnormal_cal_packing_num:
-                st.metric(label="Normal", value=abnormal_cal_packing_num["Normal"])
-            else:
-                st.metric(label="Normal", value=0)
-
-        with m[2]:
-            val_under = f"Abnormal Below -{input_abnormal}%"
-            if val_under in abnormal_cal_packing_num:
-                st.metric(label=val_under, value=abnormal_cal_packing_num[val_under])
-            else:
-                st.metric(label=val_under, value=0)
-
-    # Persist selected destination
+    # Initialize session state if needed
     if "selected_destination" not in st.session_state:
-        st.session_state["selected_destination"] = abnormal_cal_packing_impl["destination"].unique()[0]
+        st.session_state["selected_destination"] = destinations[0] if destinations else ""
 
-    with st.container(border=True):
-        st.subheader("Abnormal Number Per Destination")
-        destinations = sorted(abnormal_cal_packing_impl["destination"].unique())
-        selected_destination = st.selectbox("Choose a destination:", destinations, index=0)
+    selected_destination = st.selectbox(
+        "Choose a destination:",
+        destinations,
+        index=destinations.index(st.session_state["selected_destination"])
+        if st.session_state["selected_destination"] in destinations
+        else 0,
+    )
+    st.session_state["selected_destination"] = selected_destination
 
-        # Store selection in session state
-        if selected_destination:
-            st.session_state["selected_destination"] = selected_destination
-
-        # Generate and display pie chart
-        chart = uv.create_pie_chart_packing(
-            abnormal_cal_packing_impl, st.session_state["selected_destination"], input_abnormal
-        )
+    # Create and display chart
+    if selected_destination:
+        chart = uv.create_pie_chart_packing(abnormal_cal_packing, selected_destination, input_abnormal)
         st.plotly_chart(chart, use_container_width=True)
 
-        # Display statistics
-        filtered_data = abnormal_cal_packing_impl[
-            abnormal_cal_packing_impl["destination"] == st.session_state["selected_destination"]
-        ]
+        # Calculate and display statistics
+        filtered_data = abnormal_cal_packing[abnormal_cal_packing["destination"] == selected_destination]
         total_items = len(filtered_data)
-        normal_count = filtered_data[filtered_data["Status"] == "Normal"].shape[0]
-        abnormal_above = filtered_data[filtered_data["Status"] == f"Abnormal Above {input_abnormal}%"].shape[0]
-        abnormal_below = filtered_data[filtered_data["Status"] == f"Abnormal Below -{input_abnormal}%"].shape[0]
 
-    with st.container(border=True):
-        st.subheader(f"{st.session_state['selected_destination']} Summary Statistics")
-        stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
-        stat_col1.metric("Total Items", total_items)
-        stat_col2.metric("Normal", f"{normal_count} ({normal_count / total_items * 100:.1f}%)")
-        stat_col3.metric("Above Threshold", f"{abnormal_above} ({abnormal_above / total_items * 100:.1f}%)")
-        stat_col4.metric("Below Threshold", f"{abnormal_below} ({abnormal_below / total_items * 100:.1f}%)")
+        if total_items > 0:
+            normal_count = filtered_data[filtered_data["Status"] == "Normal"].shape[0]
+            abnormal_above = filtered_data[filtered_data["Status"] == f"Abnormal Above {input_abnormal}%"].shape[0]
+            abnormal_below = filtered_data[filtered_data["Status"] == f"Abnormal Below -{input_abnormal}%"].shape[0]
 
-    m = st.columns(2, border=True)
-    with m[0]:
-        st.subheader("Full Excel")
-        st.download_button(
-            label="Download Excel File",
-            data=generate_excel_packing,
-            file_name=f"packing_{input_previous_year}_{input_current_year}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+with st.container(border=True):
+    st.subheader(f"{selected_destination} Summary Statistics")
+    cols = st.columns(4)
+    cols[0].metric("Total Items", total_items)
+    cols[1].metric("Normal", f"{normal_count} ({normal_count / total_items * 100:.1f}%)")
+    cols[2].metric("Above Threshold", f"{abnormal_above} ({abnormal_above / total_items * 100:.1f}%)")
+    cols[3].metric("Below Threshold", f"{abnormal_below} ({abnormal_below / total_items * 100:.1f}%)")
 
-    with m[1]:
-        st.subheader("Filtered Excel")
-        st.download_button(
-            label="Download Excel File",
-            data=generate_excel_filtered_packing,
-            file_name=f"packing_filtered_{input_previous_year}_{input_current_year}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+# Display download buttons
+display_download_buttons(generate_excel_packing, generate_excel_filtered_packing, "packing")

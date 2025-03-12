@@ -4,107 +4,32 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
 
-def convert_to_excel_in_house(df, var_previous, var_current, bounderies):
-    # Initialize workbook and worksheet
+def create_excel_base():
+    """Create base workbook with default sheet removed."""
     wb = Workbook()
-
     default_sheet = wb.active
     wb.remove(default_sheet)
+    return wb
 
-    positive_threshold_fill = PatternFill(
-        start_color="FFCCCC", end_color="FFCCCC", fill_type="solid"
-    )  # Light red for values Above bounderies
-    negative_threshold_fill = PatternFill(start_color="CCCCFF", end_color="CCCCFF", fill_type="solid")
 
-    ws = wb.create_sheet(title="In House")
+def create_styled_header(ws, value, start_row, start_col, end_row, end_col):
+    """Create and style a header cell with optional merging."""
+    cell = ws.cell(row=start_row, column=start_col, value=value)
+    cell.alignment = Alignment(horizontal="center", vertical="center")
+    cell.font = Font(bold=True)
+    cell.fill = PatternFill(start_color="CCFFCC", end_color="CCFFCC", fill_type="solid")
 
-    # Populate the worksheet with data from the DataFrame, starting from row 2
-    for r_idx, row in enumerate(dataframe_to_rows(df, index=False, header=False), 3):
-        for c_idx, value in enumerate(row, 1):
-            cell = ws.cell(row=r_idx, column=c_idx, value=value)
+    if start_row != end_row or start_col != end_col:
+        ws.merge_cells(
+            start_row=start_row,
+            start_column=start_col,
+            end_row=end_row,
+            end_column=end_col,
+        )
 
-            # LVA
-            if c_idx == 5 and isinstance(value, (int, float)):
-                if value > bounderies:
-                    cell.fill = positive_threshold_fill
-                elif value < -bounderies:
-                    cell.fill = negative_threshold_fill
-            # Non LVA
-            if c_idx == 8 and isinstance(value, (int, float)):
-                if value > bounderies:
-                    cell.fill = positive_threshold_fill
-                elif value < -bounderies:
-                    cell.fill = negative_threshold_fill
 
-            # Tooling
-            if c_idx == 11 and isinstance(value, (int, float)):
-                if value > bounderies:
-                    cell.fill = positive_threshold_fill
-                elif value < -bounderies:
-                    cell.fill = negative_threshold_fill
-
-            # Process Cost
-            if c_idx == 14 and isinstance(value, (int, float)):
-                if value > bounderies:
-                    cell.fill = positive_threshold_fill
-                elif value < -bounderies:
-                    cell.fill = negative_threshold_fill
-
-            # Total Cost
-            if c_idx == 17 and isinstance(value, (int, float)):
-                if value > bounderies:
-                    cell.fill = positive_threshold_fill
-                elif value < -bounderies:
-                    cell.fill = negative_threshold_fill
-
-    # Alignment style for headers
-    alignment_center = Alignment(horizontal="center", vertical="center")
-    bold_font = Font(bold=True)
-    header_fill = PatternFill(start_color="CCFFCC", end_color="CCFFCC", fill_type="solid")  # Light green color
-
-    # Helper function to style and merge cells
-    def create_header(value, start_row, start_col, end_row, end_col):
-        ws.cell(row=start_row, column=start_col, value=value).alignment = alignment_center
-        ws.cell(row=start_row, column=start_col).font = bold_font
-        ws.cell(row=start_row, column=start_col).fill = header_fill
-        if start_row != end_row or start_col != end_col:
-            ws.merge_cells(
-                start_row=start_row,
-                start_column=start_col,
-                end_row=end_row,
-                end_column=end_col,
-            )
-
-    create_header("Part No", 1, 1, 2, 1)
-    create_header("Part Name", 1, 2, 2, 2)
-
-    create_header("LVA", 1, 3, 1, 5)
-    create_header(f"{var_previous}", 2, 3, 2, 3)
-    create_header(f"{var_current}", 2, 4, 2, 4)
-    create_header("Gap (%)", 2, 5, 2, 5)
-
-    create_header("Non LVA", 1, 6, 1, 8)
-    create_header(f"{var_previous}", 2, 6, 2, 6)
-    create_header(f"{var_current}", 2, 7, 2, 7)
-    create_header("Gap (%)", 2, 8, 2, 8)
-
-    create_header("Tooling", 1, 9, 1, 11)
-    create_header(f"{var_previous}", 2, 9, 2, 9)
-    create_header(f"{var_current}", 2, 10, 2, 10)
-    create_header("Gap (%)", 2, 11, 2, 11)
-
-    create_header("Process Cost", 1, 12, 1, 14)
-    create_header(f"{var_previous}", 2, 12, 2, 12)
-    create_header(f"{var_current}", 2, 13, 2, 13)
-    create_header("Gap (%)", 2, 14, 2, 14)
-
-    create_header("Total Cost", 1, 15, 1, 17)
-    create_header(f"{var_previous}", 2, 15, 2, 15)
-    create_header(f"{var_current}", 2, 16, 2, 16)
-    create_header("Gap (%)", 2, 17, 2, 17)
-
-    create_header("Reason", 1, 18, 2, 18)
-
+def apply_borders(ws, start_row, start_col, end_row, end_col):
+    """Apply thin borders to a range of cells."""
     thin_border = Border(
         left=Side(style="thin"),
         right=Side(style="thin"),
@@ -112,108 +37,140 @@ def convert_to_excel_in_house(df, var_previous, var_current, bounderies):
         bottom=Side(style="thin"),
     )
 
-    def apply_border(ws, start_row, start_col, end_row, end_col):
-        for row in ws.iter_rows(min_row=start_row, min_col=start_col, max_row=end_row, max_col=end_col):
-            for cell in row:
-                cell.border = thin_border
+    for row in ws.iter_rows(min_row=start_row, min_col=start_col, max_row=end_row, max_col=end_col):
+        for cell in row:
+            cell.border = thin_border
 
-    apply_border(ws, 1, 1, 1, 18)
-    apply_border(ws, 2, 1, len(df) + 2, 18)
+
+def apply_threshold_formatting(cell, value, bounderies):
+    """Apply conditional formatting based on value thresholds."""
+    if not isinstance(value, (int, float)):
+        return
+
+    if value > bounderies:
+        cell.fill = PatternFill(start_color="FFCCCC", end_color="FFCCCC", fill_type="solid")
+    elif value < -bounderies:
+        cell.fill = PatternFill(start_color="CCCCFF", end_color="CCCCFF", fill_type="solid")
+
+
+def convert_to_excel_in_house(df, var_previous, var_current, bounderies):
+    wb = create_excel_base()
+    ws = wb.create_sheet(title="In House")
+
+    # Populate data rows
+    for r_idx, row in enumerate(dataframe_to_rows(df, index=False, header=False), 3):
+        for c_idx, value in enumerate(row, 1):
+            cell = ws.cell(row=r_idx, column=c_idx, value=value)
+
+            # Apply threshold formatting to Gap columns
+            if c_idx in [5, 8, 11, 14, 17] and isinstance(value, (int, float)):
+                apply_threshold_formatting(cell, value, bounderies)
+
+    # Create headers
+    gap_columns = [(3, 5), (6, 8), (9, 11), (12, 14), (15, 17)]
+    header_labels = ["LVA", "Non LVA", "Tooling", "Process Cost", "Total Cost"]
+
+    create_styled_header(ws, "Part No", 1, 1, 2, 1)
+    create_styled_header(ws, "Part Name", 1, 2, 2, 2)
+
+    for i, (label, (start_col, end_col)) in enumerate(zip(header_labels, gap_columns)):
+        create_styled_header(ws, label, 1, start_col, 1, end_col)
+        create_styled_header(ws, f"{var_previous}", 2, start_col, 2, start_col)
+        create_styled_header(ws, f"{var_current}", 2, start_col + 1, 2, start_col + 1)
+        create_styled_header(ws, "Gap (%)", 2, end_col, 2, end_col)
+
+    create_styled_header(ws, "Reason", 1, 18, 2, 18)
+
+    # Apply borders
+    apply_borders(ws, 1, 1, 1, 18)
+    apply_borders(ws, 2, 1, len(df) + 2, 18)
 
     excel_file = BytesIO()
-
-    # Save the workbook
     wb.save(excel_file)
     excel_file.seek(0)
-
     return excel_file
 
 
 def convert_to_excel_format_out_house(df, var_previous, var_current, bounderies):
-    # Initialize workbook
-    wb = Workbook()
+    wb = create_excel_base()
 
-    # Remove the default sheet created by default
-    default_sheet = wb.active
-    wb.remove(default_sheet)
-
-    # Get unique sources
-    unique_sources = df["source"].unique()
-
-    # Define color fills for highlighting
-    positive_threshold_fill = PatternFill(
-        start_color="FFCCCC", end_color="FFCCCC", fill_type="solid"
-    )  # Light red for values Above bounderies
-    negative_threshold_fill = PatternFill(
-        start_color="CCCCFF", end_color="CCCCFF", fill_type="solid"
-    )  # Light blue for values Below bounderies
-
-    # Create a sheet for each unique source
-    for source in unique_sources:
-        # Filter dataframe for the current source
+    # Process each unique source
+    for source in df["source"].unique():
         source_df = df[df["source"] == source]
-
-        # Create a new worksheet for this source
         ws = wb.create_sheet(title=str(source))
 
-        # Populate the worksheet with data from the filtered DataFrame, starting from row 3
+        # Populate data
         for r_idx, row in enumerate(dataframe_to_rows(source_df, index=False, header=False), 3):
             for c_idx, value in enumerate(row, 1):
                 cell = ws.cell(row=r_idx, column=c_idx, value=value)
 
-                # Check if this is the Gap (%) column (column 6) and apply conditional formatting
-                if c_idx == 6 and isinstance(value, (int, float)):
-                    if value > bounderies:
-                        cell.fill = positive_threshold_fill
-                    elif value < -bounderies:
-                        cell.fill = negative_threshold_fill
+                # Apply conditional formatting to Gap column
+                if c_idx == 6:
+                    apply_threshold_formatting(cell, value, bounderies)
 
-        # Alignment style for headers
-        alignment_center = Alignment(horizontal="center", vertical="center")
-        bold_font = Font(bold=True)
-        header_fill = PatternFill(start_color="CCFFCC", end_color="CCFFCC", fill_type="solid")  # Light green color
-
-        # Helper function to style and merge cells
-        def create_header(value, start_row, start_col, end_row, end_col):
-            ws.cell(row=start_row, column=start_col, value=value).alignment = alignment_center
-            ws.cell(row=start_row, column=start_col).font = bold_font
-            ws.cell(row=start_row, column=start_col).fill = header_fill
-            if start_row != end_row or start_col != end_col:
-                ws.merge_cells(
-                    start_row=start_row,
-                    start_column=start_col,
-                    end_row=end_row,
-                    end_column=end_col,
-                )
-
-        # Create headers for each sheet
-        create_header("Part No", 1, 1, 2, 1)
-        create_header("Part Name", 1, 2, 2, 2)
-        create_header("Source", 1, 3, 2, 3)
-        create_header("Price", 1, 4, 1, 6)
-        create_header(f"{var_previous}", 2, 4, 2, 4)
-        create_header(f"{var_current}", 2, 5, 2, 5)
-        create_header("Gap (%)", 2, 6, 2, 6)
-        create_header("Reason", 1, 7, 2, 7)
-
-        thin_border = Border(
-            left=Side(style="thin"),
-            right=Side(style="thin"),
-            top=Side(style="thin"),
-            bottom=Side(style="thin"),
-        )
-
-        # Function to apply border to a range of cells
-        def apply_border(ws, start_row, start_col, end_row, end_col):
-            for row in ws.iter_rows(min_row=start_row, min_col=start_col, max_row=end_row, max_col=end_col):
-                for cell in row:
-                    cell.border = thin_border
+        # Create headers
+        create_styled_header(ws, "Part No", 1, 1, 2, 1)
+        create_styled_header(ws, "Part Name", 1, 2, 2, 2)
+        create_styled_header(ws, "Source", 1, 3, 2, 3)
+        create_styled_header(ws, "Price", 1, 4, 1, 6)
+        create_styled_header(ws, f"{var_previous}", 2, 4, 2, 4)
+        create_styled_header(ws, f"{var_current}", 2, 5, 2, 5)
+        create_styled_header(ws, "Gap (%)", 2, 6, 2, 6)
+        create_styled_header(ws, "Reason", 1, 7, 2, 7)
 
         # Apply borders
-        apply_border(ws, 1, 1, 1, 7)  # Header border
-        apply_border(ws, 2, 1, len(source_df) + 2, 7)  # Data rows border
+        apply_borders(ws, 1, 1, 1, 7)
+        apply_borders(ws, 2, 1, len(source_df) + 2, 7)
 
-    # Save the workbook to BytesIO
+    excel_file = BytesIO()
+    wb.save(excel_file)
+    excel_file.seek(0)
+    return excel_file
+
+
+def convert_to_excel_format_out_house_per_part(df, var_previous, var_current, bounderies):
+    df = df[
+        [
+            "part_num",
+            "part_no",
+            "part_name",
+            "source",
+            "price_2023",
+            "price_2024",
+            "price_gap_percent",
+        ]
+    ]
+
+    wb = create_excel_base()
+
+    # Process each unique source
+    for source in df["part_num"].unique():
+        source_df = df[df["part_num"] == source]
+        ws = wb.create_sheet(title=str(source))
+        source_df = source_df.drop(columns=["part_num"])
+        # Populate data
+        for r_idx, row in enumerate(dataframe_to_rows(source_df, index=False, header=False), 3):
+            for c_idx, value in enumerate(row, 1):
+                cell = ws.cell(row=r_idx, column=c_idx, value=value)
+
+                # Apply conditional formatting to Gap column
+                if c_idx == 6:
+                    apply_threshold_formatting(cell, value, bounderies)
+
+        # Create headers
+        create_styled_header(ws, "Part No", 1, 1, 2, 1)
+        create_styled_header(ws, "Part Name", 1, 2, 2, 2)
+        create_styled_header(ws, "Source", 1, 3, 2, 3)
+        create_styled_header(ws, "Price", 1, 4, 1, 6)
+        create_styled_header(ws, f"{var_previous}", 2, 4, 2, 4)
+        create_styled_header(ws, f"{var_current}", 2, 5, 2, 5)
+        create_styled_header(ws, "Gap (%)", 2, 6, 2, 6)
+        create_styled_header(ws, "Reason", 1, 7, 2, 7)
+
+        # Apply borders
+        apply_borders(ws, 1, 1, 1, 7)
+        apply_borders(ws, 2, 1, len(source_df) + 2, 7)
+
     excel_file = BytesIO()
     wb.save(excel_file)
     excel_file.seek(0)
@@ -221,6 +178,7 @@ def convert_to_excel_format_out_house(df, var_previous, var_current, bounderies)
 
 
 def convert_to_excel_format_packaging(df, var_previous, var_current, bounderies):
+    # Filter columns
     df = df[
         [
             "part_no",
@@ -237,104 +195,43 @@ def convert_to_excel_format_packaging(df, var_previous, var_current, bounderies)
             "Gap Total Cost",
         ]
     ]
-    # Initialize workbook
-    wb = Workbook()
 
-    # Remove the default sheet created by default
-    default_sheet = wb.active
-    wb.remove(default_sheet)
+    wb = create_excel_base()
 
-    # Get unique sources
-    unique_sources = df["destination"].unique()
+    # Process each unique destination
+    for destination in df["destination"].unique():
+        dest_df = df[df["destination"] == destination]
+        ws = wb.create_sheet(title=str(destination))
 
-    # Define color fills for highlighting
-    positive_threshold_fill = PatternFill(
-        start_color="FFCCCC", end_color="FFCCCC", fill_type="solid"
-    )  # Light red for values Above bounderies
-    negative_threshold_fill = PatternFill(
-        start_color="CCCCFF", end_color="CCCCFF", fill_type="solid"
-    )  # Light blue for values Below bounderies
-
-    # Create a sheet for each unique source
-    for source in unique_sources:
-        # Filter dataframe for the current source
-        source_df = df[df["destination"] == source]
-
-        # Create a new worksheet for this source
-        ws = wb.create_sheet(title=str(source))
-
-        # Populate the worksheet with data from the filtered DataFrame, starting from row 3
-        for r_idx, row in enumerate(dataframe_to_rows(source_df, index=False, header=False), 3):
+        # Populate data
+        for r_idx, row in enumerate(dataframe_to_rows(dest_df, index=False, header=False), 3):
             for c_idx, value in enumerate(row, 1):
                 cell = ws.cell(row=r_idx, column=c_idx, value=value)
 
-                # Gap Price Total
-                if c_idx == 12 and isinstance(value, (int, float)):
-                    if value > bounderies:
-                        cell.fill = positive_threshold_fill
-                    elif value < -bounderies:
-                        cell.fill = negative_threshold_fill
+                # Apply formatting to Gap Total Cost
+                if c_idx == 12:
+                    apply_threshold_formatting(cell, value, bounderies)
 
-        # Alignment style for headers
-        alignment_center = Alignment(horizontal="center", vertical="center")
-        bold_font = Font(bold=True)
-        header_fill = PatternFill(start_color="CCFFCC", end_color="CCFFCC", fill_type="solid")  # Light green color
+        # Create headers
+        create_styled_header(ws, "Part No", 1, 1, 2, 1)
+        create_styled_header(ws, "Part Name", 1, 2, 2, 2)
+        create_styled_header(ws, "Destination", 1, 3, 2, 3)
 
-        # Helper function to style and merge cells
-        def create_header(value, start_row, start_col, end_row, end_col):
-            ws.cell(row=start_row, column=start_col, value=value).alignment = alignment_center
-            ws.cell(row=start_row, column=start_col).font = bold_font
-            ws.cell(row=start_row, column=start_col).fill = header_fill
-            if start_row != end_row or start_col != end_col:
-                ws.merge_cells(
-                    start_row=start_row,
-                    start_column=start_col,
-                    end_row=end_row,
-                    end_column=end_col,
-                )
+        # Create cost category headers
+        cost_headers = ["Labor Cost", "Material Cost", "Inland Cost", "Total Cost"]
+        for i, header in enumerate(cost_headers):
+            col_start = 4 + i * 2
+            create_styled_header(ws, header, 1, col_start, 1, col_start + 1)
+            create_styled_header(ws, f"{var_previous}", 2, col_start, 2, col_start)
+            create_styled_header(ws, f"{var_current}", 2, col_start + 1, 2, col_start + 1)
 
-        # Create headers for each sheet
-        create_header("Part No", 1, 1, 2, 1)
-        create_header("Part Name", 1, 2, 2, 2)
-        create_header("Destination", 1, 3, 2, 3)
-
-        create_header("Labor Cost", 1, 4, 1, 5)
-        create_header(f"{var_previous}", 2, 4, 2, 4)
-        create_header(f"{var_current}", 2, 5, 2, 5)
-
-        create_header("Material Cost", 1, 6, 1, 7)
-        create_header(f"{var_previous}", 2, 6, 2, 6)
-        create_header(f"{var_current}", 2, 7, 2, 7)
-
-        create_header("Inland Cost", 1, 8, 1, 9)
-        create_header(f"{var_previous}", 2, 8, 2, 8)
-        create_header(f"{var_current}", 2, 9, 2, 9)
-
-        create_header("Total Cost", 1, 10, 1, 11)
-        create_header(f"{var_previous}", 2, 10, 2, 10)
-        create_header(f"{var_current}", 2, 11, 2, 11)
-
-        create_header("Gap Total Cost (%)", 1, 12, 2, 12)
-        create_header("Reason", 1, 13, 2, 13)
-
-        thin_border = Border(
-            left=Side(style="thin"),
-            right=Side(style="thin"),
-            top=Side(style="thin"),
-            bottom=Side(style="thin"),
-        )
-
-        # Function to apply border to a range of cells
-        def apply_border(ws, start_row, start_col, end_row, end_col):
-            for row in ws.iter_rows(min_row=start_row, min_col=start_col, max_row=end_row, max_col=end_col):
-                for cell in row:
-                    cell.border = thin_border
+        create_styled_header(ws, "Gap Total Cost (%)", 1, 12, 2, 12)
+        create_styled_header(ws, "Reason", 1, 13, 2, 13)
 
         # Apply borders
-        apply_border(ws, 1, 1, 1, 13)  # Header border
-        apply_border(ws, 2, 1, len(source_df) + 2, 13)  # Data rows border
+        apply_borders(ws, 1, 1, 1, 13)
+        apply_borders(ws, 2, 1, len(dest_df) + 2, 13)
 
-    # Save the workbook to BytesIO
     excel_file = BytesIO()
     wb.save(excel_file)
     excel_file.seek(0)
