@@ -1,0 +1,98 @@
+import streamlit as st
+
+# Initialize session state variables if they don't exist
+if "authentication_status" not in st.session_state:
+    st.session_state["authentication_status"] = False
+if "name" not in st.session_state:
+    st.session_state["name"] = ""
+
+st.set_page_config(page_title="PBMD - Dashboard", layout="wide")
+st.image("images/toyota.png", width=250)
+st.header("📋 UPDATE DATABASE - PBMD")
+
+# Authentication status checking
+if st.session_state["authentication_status"]:
+    # User info, input data button, and logout
+    col1, col2 = st.columns([0.8, 0.20])
+    with col1:
+        st.subheader(f"Welcome {st.session_state['name']}")
+    with col2:
+        if st.button("🗒️ Dashboard", use_container_width=True):
+            st.switch_page("app.py")
+
+    # Create input form
+    with st.form(key="input_form"):
+        st.subheader("Data Input Form")
+
+        # Dropdown for selecting data type
+        data_type = st.selectbox("Select Data Type", options=["INHOUSE", "OUTHOUSE", "PACKING"], index=0)
+
+        # File uploader for Excel files
+        uploaded_file = st.file_uploader(
+            "Upload Excel File", type=["xlsx"], help="Please upload an Excel file with the required format"
+        )
+
+        # Submit button
+        submit_button = st.form_submit_button(label="Submit Data", type="primary")
+
+        if submit_button:
+            if uploaded_file is not None:
+                st.success(f"Successfully uploaded {uploaded_file.name} for {data_type} database")
+                # Here you can add your processing logic
+
+                if data_type == "INHOUSE":
+                    print("")
+                if data_type == "OUTHOUSE":
+                    print("")
+                if data_type == "PACKING":
+                    print()
+
+    with st.container(border=False):
+        col1, col2, col3, col4 = st.columns([0.18, 0.18, 0.18, 0.4], gap="small")
+        with col1:
+            try:
+                # Read the template file
+                with open("resource/in_house_template_input_database.xlsx", "rb") as template_file:
+                    template_bytes_in = template_file.read()
+
+                st.download_button(
+                    label="Download Template Inhouse",
+                    data=template_bytes_in,
+                    file_name="in_house_template_input_data.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            except FileNotFoundError:
+                st.error("Template file not found")
+
+        with col2:
+            try:
+                # Read the template file
+                with open("resource/out_house_template_input_database.xlsx", "rb") as template_file:
+                    template_bytes_out = template_file.read()
+
+                st.download_button(
+                    label="Download Template Outhouse",
+                    data=template_bytes_out,
+                    file_name="out_house_template_input_database.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            except FileNotFoundError:
+                st.error("Template file not found")
+
+        with col3:
+            try:
+                # Read the template file
+                with open("resource/packing_template_input_database.xlsx", "rb") as template_file:
+                    template_bytes_packing = template_file.read()
+
+                st.download_button(
+                    label="Download Template Packing",
+                    data=template_bytes_packing,
+                    file_name="packing_template_input_database.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            except FileNotFoundError:
+                st.error("Template file not found")
+
+else:
+    st.switch_page("app.py")
