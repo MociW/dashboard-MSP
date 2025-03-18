@@ -10,6 +10,8 @@ import utils.sql_packing as up
 import utils.sql_out_house as uo
 import utils.visualize as uv
 import utils.formatting as uf
+import utils.pdf.generate_pdf as ag
+import os
 
 # Page configuration
 st.set_page_config(page_title="TMMIN PBMD - Dashboard", layout="wide")
@@ -40,13 +42,18 @@ if st.session_state["authentication_status"]:
     # User info, input data button, and logout
     col1, col2, col3, col4 = st.columns([0.52, 0.20, 0.20, 0.08])
     with col1:
-        st.subheader(f"Welcome {st.session_state['name']}")
-    with col2:
-        if st.button("📊 Input Data", use_container_width=True):
-            st.switch_page("pages/input_data.py")
+        role = st.session_state["roles"][0].replace("_", " ").title()
+        st.subheader(f"Welcome {st.session_state['name']} The {role}")
     with col3:
-        if st.button("📋 Update Data", use_container_width=True):
-            st.switch_page("pages/update_data.py")
+        allowed_input_roles = ["archmagus", "oracles", "treasurers", "shielders", "seekers"]
+        if st.session_state["roles"][0] in allowed_input_roles:
+            if st.button("📊 Input Data", use_container_width=True):
+                st.switch_page("pages/input_data.py")
+    with col2:
+        allowed_update_roles = ["archmagus", "oracles"]
+        if st.session_state["roles"][0] in allowed_update_roles:
+            if st.button("📋 Update Data", use_container_width=True):
+                st.switch_page("pages/update_data.py")
     with col4:
         authenticator.logout()
 
@@ -64,7 +71,6 @@ if st.session_state["authentication_status"]:
         if submit_button:
             st.session_state["years"] = [input_previous_year, input_current_year]
             st.session_state["input_abnormal"] = input_abnormal
-
     # Check if required session state data exists
     if not all(key in st.session_state for key in ["years", "input_abnormal"]):
         st.warning("Please submit the form above to continue")
@@ -126,11 +132,12 @@ def get_in_house_data(years, abnormal_threshold):
         full_abnormal_cal = conn.query(us.full_abnormal_cal(years, abnormal_threshold))
         return status_items, abnormal_cal, full_abnormal_cal
     except Exception as e:
-        if "sqlalchemy.exc.ProgrammingError" in str(e) or "psycopg2.errors.SyntaxError" in str(e):
-            st.warning("There was an issue with your database query. Please check your input parameters.")
-            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-        else:
-            raise e
+        st.warning(e)
+        # if "sqlalchemy.exc.ProgrammingError" in str(e) or "psycopg2.errors.SyntaxError" in str(e):
+        #     st.warning("There was an issue with your database query. Please check your input parameters.")
+        #     return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        # else:
+        #     raise e
 
 
 try:
@@ -139,7 +146,9 @@ try:
 
     # Process data
     status_items_counts = status_items_impl["Status"].value_counts()
+    full_abnormal_cal_impl["Status Abnormal"] = abnormal_cal_impl["Status Abnormal"]
     abnormal_cal_counts = abnormal_cal_impl["Status Abnormal"].value_counts()
+    explain_cal_counts = abnormal_cal_impl["Explanation Status"].value_counts()
 
     # Process abnormal data categories
     abnormal_categories = {
@@ -163,8 +172,10 @@ try:
         abnormal_filtered, input_previous_year, input_current_year, int(input_abnormal)
     )
 
+    st.dataframe(full_abnormal_cal_impl)
+
     # Display metrics
-    mc = st.columns(2, border=True)
+    mc = st.columns(3, border=True)
     with mc[0]:
         st.subheader("Item Status")
         display_status_metrics(status_items_counts)
@@ -177,12 +188,20 @@ try:
             st.metric(label=val_above, value=abnormal_cal_counts.get(val_above, 0))
         with m[1]:
             st.metric(label="Normal", value=abnormal_cal_counts.get("Normal", 0))
+    with mc[2]:
+        st.subheader("Explanation Status")
+        m = st.columns(3, gap="small")
+        statuses = ["Approved", "Disapproved", "Awaiting"]
+        for i, status in enumerate(statuses):
+            with m[i]:
+                st.metric(label=status, value=explain_cal_counts.get(status, 0))
 
     # Display pie charts for all categories
     for category_name, category_data in abnormal_categories.items():
         uv.pie_char_with_total_counts(category_data, category_name, input_abnormal)
     # Display download buttons
     display_download_buttons(generate_excel, generate_excel_filtered, "in_house")
+
 except Exception as e:
     if "KeyError" in str(e):
         st.warning("There was an issue with your database query. Please check your input parameters.")
@@ -201,6 +220,7 @@ def get_out_house_data(years, abnormal_threshold):
         abnormal_cal_per_part = conn.query(uo.abnormal_cal_out_house_per_part(years))
         return status_items, abnormal_cal, abnormal_cal_per_part
     except Exception as e:
+        st.warning(e)
         if "sqlalchemy.exc.ProgrammingError" in str(e) or "psycopg2.errors.SyntaxError" in str(e):
             st.warning("There was an issue with your database query. Please check your input parameters.")
             return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
@@ -215,6 +235,7 @@ try:
     # Process data
     status_counts_out = status_items_out["Status"].value_counts()
     abnormal_counts_out = abnormal_cal_out["Status"].value_counts()
+    explain_cal_counts_out = abnormal_cal_impl["Explanation Status"].value_counts()
 
     # Generate Excel files
     df_generate_out = abnormal_cal_out.drop("Status", axis=1)
@@ -236,7 +257,7 @@ try:
     )
 
     # Display metrics
-    mc = st.columns(2, border=True)
+    mc = st.columns(3, border=True)
     with mc[0]:
         st.subheader("Item Status")
         display_status_metrics(status_counts_out)
@@ -248,6 +269,14 @@ try:
         for i, status in enumerate(statuses):
             with m[i]:
                 st.metric(label=status, value=abnormal_counts_out.get(status, 0))
+
+    with mc[2]:
+        st.subheader("Explanation Status")
+        m = st.columns(3, gap="small")
+        statuses = ["Approved", "Disapproved", "Awaiting"]
+        for i, status in enumerate(statuses):
+            with m[i]:
+                st.metric(label=status, value=explain_cal_counts_out.get(status, 0))
 
     # Display pie chart
     with st.container(border=True):
@@ -308,7 +337,7 @@ try:
                     st.metric(
                         label="Highest Gap",
                         value=f"{top_10_above['Gap Price'].iloc[0]:.2f}%",
-                        delta=f"{top_10_above['Gap Price'].iloc[0]:.2f}%",
+                        delta=f"{top_10_above['Gap Price'].iloc[0] - float(input_abnormal):.2f}%",
                         delta_color="inverse",
                     )
                 with col3:
@@ -361,7 +390,7 @@ try:
                     st.metric(
                         label="Lowest Gap",
                         value=f"{top_10_below['Gap Price'].iloc[0]:.2f}%",
-                        delta=f"{top_10_below['Gap Price'].iloc[0]:.2f}%",
+                        delta=f"{top_10_below['Gap Price'].iloc[0] + float(input_abnormal):.2f}%",
                         delta_color="normal",
                     )
 
@@ -370,7 +399,6 @@ try:
                         label=f"Price {input_current_year}",
                         value=f"Rp {top_10_below[f'Price {input_current_year}'].iloc[0]:,.0f}",
                     )
-
     # Source selection
     with st.container(border=True):
         st.subheader("Abnormal Number Per Source")
@@ -455,6 +483,7 @@ def get_packing_data(years, abnormal_threshold):
         abnormal_cal = conn.query(up.packing_max_abnormal_cal(years, abnormal_threshold))
         return status_items, abnormal_cal
     except Exception as e:
+        st.warning(e)
         if "sqlalchemy.exc.ProgrammingError" in str(e) or "psycopg2.errors.SyntaxError" in str(e):
             st.warning("There was an issue with your database query. Please check your input parameters.")
             return pd.DataFrame(), pd.DataFrame()
@@ -470,6 +499,7 @@ try:
 
     status_counts_packing = status_items_packing["Status"].value_counts()
     abnormal_counts_packing = abnormal_cal_packing["Status"].value_counts()
+    explanation_counts_packing = abnormal_cal_packing["Explanation Status"].value_counts()
 
     # Generate Excel files
     generate_excel_packing = uf.convert_to_excel_format_packaging(
@@ -485,7 +515,7 @@ try:
     )
 
     # Display metrics
-    mc = st.columns(2, border=True)
+    mc = st.columns(3, border=True)
     with mc[0]:
         st.subheader("Item Status")
         display_status_metrics(status_counts_packing)
@@ -497,6 +527,13 @@ try:
         for i, status in enumerate(statuses):
             with m[i]:
                 st.metric(label=status, value=abnormal_counts_packing.get(status, 0))
+    with mc[2]:
+        st.subheader("Explanation Status")
+        m = st.columns(3, gap="small")
+        statuses = ["Approved", "Disapproved", "Awaiting"]
+        for i, status in enumerate(statuses):
+            with m[i]:
+                st.metric(label=status, value=explanation_counts_packing.get(status, 0))
 
     # Destination selection
     with st.container(border=True):
@@ -543,3 +580,23 @@ try:
 except Exception as e:
     if "KeyError" in str(e):
         st.warning("There was an issue with your database query. Please check your input parameters.")
+
+st.divider()
+st.subheader("PDF")
+if st.button("Generate PDF"):
+    with st.spinner("Generating PDF..."):
+        pdf_data = ag.generate_pdf_report(
+            years=years,
+            df_inhouse=full_abnormal_cal_impl,
+            df_outhouse=abnormal_cal_out,
+            df_packing=abnormal_cal_packing,
+            boundaries=input_abnormal,
+        )
+
+        pdf_bytes = bytes(pdf_data)
+        st.download_button(
+            label="Download PDF Report",
+            data=pdf_bytes,
+            file_name=f"Report Abnomality {input_current_year}-{input_previous_year}.pdf",
+            mime="application/pdf",
+        )

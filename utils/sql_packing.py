@@ -35,9 +35,27 @@ def packing_max_abnormal_cal(years, boundaries):
             pd.labor_cost::numeric,
             pd.material_cost::numeric,
             pd.inland_cost::numeric,
-            pd.year_item
+            pd.status,
+            pd.year_item,
+            pe.explanation,
+            pe.explained_at
         FROM packing p 
         JOIN packing_detail pd ON p.id = pd.packing_item
+        LEFT JOIN (
+            SELECT
+            packing_detail_id,
+            explanation,
+            explained_at,
+            ROW_NUMBER() OVER (
+                PARTITION BY
+                packing_detail_id
+                ORDER BY
+                explained_at DESC
+            ) as rn
+            FROM
+            packing_explanations
+        ) pe ON pd.id = pe.packing_detail_id
+        AND pe.rn = 1
         WHERE pd.year_item IN ({years})
     ),
     gap_cal AS (
@@ -54,6 +72,11 @@ def packing_max_abnormal_cal(years, boundaries):
             MAX(t2.material_cost) AS "Material Cost {year2}",
             MAX(t2.inland_cost) AS "Inland Cost {year2}",
             MAX(t2.labor_cost + t2.material_cost + t2.inland_cost) AS "Max Total Cost {year2}",
+            
+            -- Include t2.status since you're using year2's data for comparison
+            MAX(t2.status) AS status,
+            MAX(t2.explained_at) as explained_at,
+            
 
             ROUND(
                 (MAX(t2.labor_cost + t2.material_cost + t2.inland_cost) - MAX(t1.labor_cost + t1.material_cost + t1.inland_cost)) 
@@ -87,10 +110,16 @@ def packing_max_abnormal_cal(years, boundaries):
 
         "Gap Total Cost",
         CASE
-            WHEN "Gap Total Cost" > {boundaries} THEN 'Abnormal Above {boundaries}%'
-            WHEN "Gap Total Cost" < -{boundaries} THEN 'Abnormal Below -{boundaries}%'
+            WHEN "Gap Total Cost" > {boundaries} AND status = 'PENDING' THEN 'Abnormal Above {boundaries}%'
+            WHEN "Gap Total Cost" < -{boundaries} AND status = 'PENDING' THEN 'Abnormal Below -{boundaries}%'
             ELSE 'Normal'
-        END AS "Status"
+        END AS "Status",
+        CASE
+            WHEN status = 'APPROVE' THEN 'Approved'
+            WHEN status = 'PENDING' AND explained_at IS NOT NULL THEN 'Disapproved'
+            WHEN status = 'PENDING' AND explained_at IS NULL THEN 'Awaiting'
+            ELSE 'Awaiting'
+        END AS "Explanation Status"
     FROM gap_cal;
     """.format(years=",".join(map(str, years)), year1=years[0], year2=years[1], boundaries=boundaries)
 

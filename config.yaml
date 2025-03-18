@@ -1,6 +1,6 @@
 cookie:
-    # expiry_days: 0.0006944444
-    expiry_days: 1
+    expiry_days: 0.0006944444
+    # expiry_days: 1
     key: 797fdfbcc99158f85e54509d54fee284fa76cb3dddcdedb1d40011205c62b8af5b18f98b3bc4b5cbb1b37a992645bb3d3d1555716c799520a150e2739831adf1d7d841f8e62f024775348916b1601a627ac222b681df0a5ac4f1b8feac4e4edc6b4cfdb72f0a2d09bc5149a6d14fffa7b6a0452ca66434f3bf6ed3b2e2a359fa599a7751cf6f95c00e506bb1b63ac8c46d4fbe86b3354729822f69ed901102e5718340eb528990590d4ebcd42739e9e78078d7d50e8a306d0a561ee8acf85953014e2d7399c7ac138016c807818c6362c276f5d14c3bf98ce623bfe6c624306e4e6f5decf4e89b95c5803e7599763600afe3ba664e9f9385a49f1d0a6975ae17
     name: pbmd
 credentials:
@@ -12,7 +12,59 @@ credentials:
             last_name: Kisaragi
             logged_in: false
             password: $2a$12$N.v7a2hyjRkLAuLbAg5MqOGSU8XphF2owpg9E9ZEUaUKbFYbcj5vS
-            # telurceplok
+            roles:
+                - archmagus
+
+        jackiechan:
+            email: jackie.chan@toyota.co.id
+            failed_login_attempts: 0
+            first_name: Jackie
+            last_name: Chan
+            logged_in: false
+            password: $2a$12$N.v7a2hyjRkLAuLbAg5MqOGSU8XphF2owpg9E9ZEUaUKbFYbcj5vS
+            roles:
+                - novice
+
+        nathasa.romanoff:
+            email: nathasa.romanoff@toyota.co.id
+            failed_login_attempts: 0
+            first_name: Nathasa
+            last_name: Romanoff
+            logged_in: false
+            password: $2a$12$N.v7a2hyjRkLAuLbAg5MqOGSU8XphF2owpg9E9ZEUaUKbFYbcj5vS
+            roles:
+                - shielders
+
+        jack.sparrow:
+            email: nathasa.romanoff@toyota.co.id
+            failed_login_attempts: 0
+            first_name: Jack
+            last_name: Sparrow
+            logged_in: false
+            password: $2a$12$N.v7a2hyjRkLAuLbAg5MqOGSU8XphF2owpg9E9ZEUaUKbFYbcj5vS
+            roles:
+                - seekers
+
+        asep.william:
+            email: nathasa.romanoff@toyota.co.id
+            failed_login_attempts: 0
+            first_name: Asep
+            last_name: William
+            logged_in: false
+            password: $2a$12$N.v7a2hyjRkLAuLbAg5MqOGSU8XphF2owpg9E9ZEUaUKbFYbcj5vS
+            roles:
+                - treasurers
+
+        sung.jinwoo:
+            email: nathasa.romanoff@toyota.co.id
+            failed_login_attempts: 0
+            first_name: Sung
+            last_name: Jinwoo
+            logged_in: false
+            password: $2a$12$N.v7a2hyjRkLAuLbAg5MqOGSU8XphF2owpg9E9ZEUaUKbFYbcj5vS
+            roles:
+                - oracles
+
 preauthorized:
     emails:
         - pbmd.magang92@toyota.co.id

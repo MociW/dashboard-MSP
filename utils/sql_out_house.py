@@ -33,10 +33,28 @@ def abnormal_cal_out_house(years, boundaries):
             o.part_name,
             od.price,
             od.source,
-            od.year_item
+            od.status,
+            od.year_item,
+            oe.explanation,
+            oe.explained_at
             FROM
             out_house o
             JOIN out_house_detail od ON o.id = od.out_house_item
+            LEFT JOIN (
+            SELECT
+            out_house_detail_id,
+            explanation,
+            explained_at,
+            ROW_NUMBER() OVER (
+                PARTITION BY
+                out_house_detail_id
+                ORDER BY
+                explained_at DESC
+            ) as rn
+            FROM
+            out_house_explanations
+        ) oe ON od.id = oe.out_house_detail_id
+        AND oe.rn = 1
             WHERE
             od.year_item IN ({years})
     )
@@ -54,13 +72,20 @@ def abnormal_cal_out_house(years, boundaries):
             WHEN ROUND(
             ((d2.price - d1.price) / NULLIF(d1.price, 0)) * 100,
             2
-            ) > {boundaries} THEN 'Abnormal Above {boundaries}%'
+            ) > {boundaries} AND d2.status = 'PENDING' THEN 'Abnormal Above {boundaries}%'
             WHEN ROUND(
             ((d2.price - d1.price) / NULLIF(d1.price, 0)) * 100,
             2
-            ) < -{boundaries} THEN 'Abnormal Below -{boundaries}%'
+            ) < -{boundaries} AND d2.status = 'PENDING' THEN 'Abnormal Below -{boundaries}%'
         ELSE 'Normal'
-    END AS "Status"
+    END AS "Status",
+    CASE
+        WHEN d2.status = 'APPROVE' THEN 'Approved'
+        WHEN d2.status = 'PENDING' AND d2.explained_at IS NOT NULL THEN 'Disapproved'
+        WHEN d2.status = 'PENDING' AND d2.explained_at IS NULL THEN 'Awaiting'
+        ELSE 'Awaiting'
+    END AS "Explanation Status"
+
     FROM
         dataframe d1
         JOIN dataframe d2 ON d1.id = d2.id
