@@ -103,7 +103,9 @@ def generate_pdf_report(
 
         pdf.set_xy(x, y + 10)
         pdf.set_font("montserrat", "B", 18)
-        if value > 0 and (title == "Abnormal Below 5%" or title == "Abnormal Above 5%" or title == "Abnormal"):
+        if value > 0 and (
+            title == f"Abnormal Below -{boundaries}%" or title == f"Abnormal Above {boundaries}%" or title == "Abnormal"
+        ):
             pdf.set_text_color(*colors["error_text"])
         else:
             pdf.set_text_color(*colors["primary_text"])

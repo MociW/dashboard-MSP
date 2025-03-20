@@ -3,6 +3,7 @@ import repository.psql.conn as conn
 import repository.out_house as ro
 import repository.in_house as ri
 import repository.packing as rp
+import pandas as pd
 import os
 
 # Initialize session state variables if they don't exist
@@ -10,6 +11,8 @@ if "authentication_status" not in st.session_state:
     st.session_state["authentication_status"] = False
 if "name" not in st.session_state:
     st.session_state["name"] = ""
+if "failed_data" not in st.session_state:
+    st.session_state["failed_data"] = None
 
 st.set_page_config(page_title="PBMD - Dashboard", layout="wide")
 st.image("images/toyota.png", width=250)
@@ -40,26 +43,57 @@ if st.session_state["authentication_status"]:
         # Submit button
         submit_button = st.form_submit_button(label="Submit Data", type="primary")
 
-        if submit_button:
-            if uploaded_file is not None:
-                project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-                config_path = os.path.join(project_root, "database-dev.yaml")
-                config = conn.load_config(config_path)
-                if not config:
-                    print("Failed to load configuration. Exiting.")
-
+    if submit_button:
+        if uploaded_file is not None:
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+            config_path = os.path.join(project_root, "database-dev.yaml")
+            config = conn.load_config(config_path)
+            if not config:
+                st.error("Failed to load configuration. Exiting.")
+            else:
                 db_connection = conn.DatabaseConnection(config["database"])
                 try:
+                    result = None
                     if data_type == "INHOUSE":
-                        ri.input_in_house_new_data(uploaded_file, db_connection)
-                    if data_type == "OUTHOUSE":
-                        ro.input_out_house_new_data(uploaded_file, db_connection)
-                    if data_type == "PACKING":
-                        rp.input_packing_new_data(uploaded_file, db_connection)
+                        result = ri.input_in_house_new_data(uploaded_file, db_connection)
+                    elif data_type == "OUTHOUSE":
+                        result = ro.input_out_house_new_data(uploaded_file, db_connection)
+                    elif data_type == "PACKING":
+                        result = rp.input_packing_new_data(uploaded_file, db_connection)
 
-                    st.success(f"Successfully uploaded {uploaded_file.name} to {data_type.lower()} database")
-                except Exception:
-                    st.warning(f"Failed uploaded {uploaded_file.name} to {data_type.lower()} database")
+                    # Display results
+                    if result:
+                        st.success(
+                            f"✅ Successfully processed {result['success']} out of {result['total']} records in {uploaded_file.name}"
+                        )
+
+                        if result["failed"] > 0:
+                            st.warning(f"⚠️ {result['failed']} records failed to import")
+
+                            # Store failed data in session state
+                            st.session_state["failed_data"] = result["failed_parts"]
+
+                            # Create a dataframe of failed parts for better display
+                            failed_df = pd.DataFrame(result["failed_parts"])
+
+                            # Use expander to keep the UI clean
+                            with st.expander("View Failed Records"):
+                                st.dataframe(failed_df)
+
+                                # Add option to download failed records as CSV
+                                excel = failed_df.to_excel(index=False)
+                                st.download_button(
+                                    label="Download Failed Records Excel",
+                                    data=excel,
+                                    file_name="failed_imports.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                )
+                    else:
+                        st.success(f"✅ Successfully updated {uploaded_file.name} to {data_type.lower()} database")
+                except Exception as e:
+                    st.error(f"❌ Failed to update {uploaded_file.name} to {data_type.lower()} database: {str(e)}")
+        else:
+            st.error("Please upload a file first")
 
     with st.container(border=False):
         col1, col2, col3, col4 = st.columns([0.18, 0.18, 0.18, 0.4], gap="small")

@@ -42,8 +42,7 @@ if st.session_state["authentication_status"]:
     # User info, input data button, and logout
     col1, col2, col3, col4 = st.columns([0.52, 0.20, 0.20, 0.08])
     with col1:
-        role = st.session_state["roles"][0].replace("_", " ").title()
-        st.subheader(f"Welcome {st.session_state['name']} The {role}")
+        st.subheader(f"Welcome {st.session_state['name']}")
     with col3:
         allowed_input_roles = ["archmagus", "oracles", "treasurers", "shielders", "seekers"]
         if st.session_state["roles"][0] in allowed_input_roles:
@@ -132,12 +131,12 @@ def get_in_house_data(years, abnormal_threshold):
         full_abnormal_cal = conn.query(us.full_abnormal_cal(years, abnormal_threshold))
         return status_items, abnormal_cal, full_abnormal_cal
     except Exception as e:
-        st.warning(e)
-        # if "sqlalchemy.exc.ProgrammingError" in str(e) or "psycopg2.errors.SyntaxError" in str(e):
-        #     st.warning("There was an issue with your database query. Please check your input parameters.")
-        #     return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
-        # else:
-        #     raise e
+        # st.warning(e)
+        if "sqlalchemy.exc.ProgrammingError" in str(e) or "psycopg2.errors.SyntaxError" in str(e):
+            st.warning("There was an issue with your database query. Please check your input parameters.")
+            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        else:
+            raise e
 
 
 try:
@@ -171,8 +170,6 @@ try:
     generate_excel_filtered = uf.convert_to_excel_in_house(
         abnormal_filtered, input_previous_year, input_current_year, int(input_abnormal)
     )
-
-    st.dataframe(full_abnormal_cal_impl)
 
     # Display metrics
     mc = st.columns(3, border=True)
@@ -220,7 +217,7 @@ def get_out_house_data(years, abnormal_threshold):
         abnormal_cal_per_part = conn.query(uo.abnormal_cal_out_house_per_part(years))
         return status_items, abnormal_cal, abnormal_cal_per_part
     except Exception as e:
-        st.warning(e)
+        # st.warning(e)
         if "sqlalchemy.exc.ProgrammingError" in str(e) or "psycopg2.errors.SyntaxError" in str(e):
             st.warning("There was an issue with your database query. Please check your input parameters.")
             return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
@@ -483,7 +480,7 @@ def get_packing_data(years, abnormal_threshold):
         abnormal_cal = conn.query(up.packing_max_abnormal_cal(years, abnormal_threshold))
         return status_items, abnormal_cal
     except Exception as e:
-        st.warning(e)
+        # st.warning(e)
         if "sqlalchemy.exc.ProgrammingError" in str(e) or "psycopg2.errors.SyntaxError" in str(e):
             st.warning("There was an issue with your database query. Please check your input parameters.")
             return pd.DataFrame(), pd.DataFrame()
