@@ -86,7 +86,7 @@ def update_packing_data(excel_file, db_connection):
 
                         cursor.execute(
                             """
-                            INSERT INTO "out_house" ("id", "part_no", "part_name")
+                            INSERT INTO "packing" ("id", "part_no", "part_name")
                             VALUES (%s, %s, %s) 
                             """,
                             (inserted_uuid, row["part_no"], row["part_name"]),
@@ -119,8 +119,13 @@ def update_packing_data(excel_file, db_connection):
                         detail_id = detail_result[0]
                         cursor.execute(
                             """
-                            UPDATE "packing_detail"
-                            SET "price" = %s, "status" = %s
+                            UPDATE 
+                                "packing_detail"
+                            SET 
+                                "labor_cost" = %s, 
+                                "material_cost" = %s, 
+                                "inland_cost" = %s, 
+                                "status" = %s
                             WHERE "id" = %s
                             """,
                             (

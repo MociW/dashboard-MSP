@@ -56,7 +56,7 @@ def input_out_house_new_data(excel_file, db_connection):
                             row["year"],
                         ),
                     )
-                    connection.connection.commit()
+                    connection.commit()
                     success_count += 1
 
                 except Exception as e:

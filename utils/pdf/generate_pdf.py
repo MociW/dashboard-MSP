@@ -47,7 +47,7 @@ def generate_pdf_report(
     colors = {
         "primary_text": (34, 38, 63),
         "secondary_text": (57, 74, 86),
-        "light_text": (150, 150, 150),
+        "light_text": (0, 0, 0),
         "error_text": (207, 16, 32),
         "fill_color": (231, 232, 231),
         "header_bg": (34, 48, 63),
@@ -237,7 +237,7 @@ def generate_pdf_report(
 
     distribution_description = "This pie chart displays the proportion of Normal entries versus Abnormal entries in the dataset, helping to visualize the overall data quality and identify potential areas requiring further investigation."
     pdf.set_font("montserrat", "", 7)
-    pdf.set_text_color(150, 150, 150)
+    pdf.set_text_color(colors["light_text"])
     pdf.set_y(pdf.get_y() + 5)
     pdf.set_x(page_params["margin"]["left"])
     pdf.multi_cell(page_params["width"] - 60, 3, distribution_description)
@@ -248,7 +248,7 @@ def generate_pdf_report(
     pdf.set_font("montserrat", "", 8)
     pdf.set_text_color(*colors["light_text"])
     pdf.cell(0, 6, formatted_date, border=0, new_x=XPos.LMARGIN, new_y=YPos.NEXT, align="R")
-    add_section_title("In House")
+    add_section_title("Out House")
 
     out_house_abnormal = df_outhouse["Status"].value_counts()
     out_house_explanation = df_outhouse["Explanation Status"].value_counts()
@@ -260,9 +260,9 @@ def generate_pdf_report(
     ]
 
     out_house_right_stats = [
-        ("Abnormal Below -5%", out_house_abnormal.get("Abnormal Below -5%", 0)),
+        (f"Abnormal Below -{boundaries}%", out_house_abnormal.get(f"Abnormal Below -{boundaries}%", 0)),
         ("Normal", out_house_abnormal.get("Normal", 0)),
-        ("Abnormal Above 5%", out_house_abnormal.get("Abnormal Above 5%", 0)),
+        (f"Abnormal Above {boundaries}%", out_house_abnormal.get(f"Abnormal Above {boundaries}%", 0)),
     ]
 
     add_data_section(out_house_left_stats, out_house_right_stats)
@@ -286,7 +286,7 @@ def generate_pdf_report(
     pdf.line(divider_x, start_y, divider_x, section_end_y)
 
     pdf.set_font("montserrat", "", 7)
-    pdf.set_text_color(150, 150, 150)
+    pdf.set_text_color(colors["light_text"])
     pdf.set_y(start_y + 5)
     pdf.set_x(divider_x + 10)
     text_distribution_abnormal_out_house = "This pie chart illustrates the proportion of Normal versus Abnormal entries specifically for Out House inventory items. The visualization helps identify potential data quality issues in external storage locations by displaying the relative frequency of entries that meet expected standards compared to those requiring review. This information is crucial for maintaining accurate inventory records across all storage locations and prioritizing quality control efforts for out-of-facility items."
@@ -307,7 +307,7 @@ def generate_pdf_report(
 
     distribution_description = "This bar chart displays the breakdown of Normal and Abnormal entries across different data sources. By comparing the frequency of data quality issues by source, this visualization helps identify which input channels may have higher rates of problematic entries. This analysis enables targeted improvement efforts for specific sources with higher abnormality rates, ultimately improving overall data reliability."
     pdf.set_font("montserrat", "", 7)
-    pdf.set_text_color(150, 150, 150)
+    pdf.set_text_color(colors["light_text"])
     pdf.set_y(pdf.get_y())
     pdf.set_x(page_params["margin"]["left"])
     pdf.multi_cell(page_params["width"] - 30, 3, distribution_description)
@@ -330,9 +330,9 @@ def generate_pdf_report(
     ]
 
     out_house_right_stats = [
-        ("Abnormal Below -5%", packing_abnormal.get("Abnormal Below -5%", 0)),
+        (f"Abnormal Below -{boundaries}%", packing_abnormal.get(f"Abnormal Below -{boundaries}%", 0)),
         ("Normal", packing_abnormal.get("Normal", 0)),
-        ("Abnormal Above 5%", packing_abnormal.get("Abnormal Above 5%", 0)),
+        (f"Abnormal Above {boundaries}%", packing_abnormal.get(f"Abnormal Above {boundaries}%", 0)),
     ]
 
     add_data_section(out_house_left_stats, out_house_right_stats)
@@ -355,65 +355,60 @@ def generate_pdf_report(
         sorted_destinations = destination_counts["destination"].tolist()
 
         # Calculate how many destination codes should go in each group
-        codes_per_group = len(sorted_destinations) // 3
+        codes_per_group = len(sorted_destinations) // 2
 
         # Create the groups (ensuring all codes are distributed)
         group1_codes = sorted_destinations[:codes_per_group]
         group2_codes = sorted_destinations[codes_per_group : 2 * codes_per_group]
-        group3_codes = sorted_destinations[2 * codes_per_group :]  # This will take any remainder
 
         # Create DataFrames for each group
         df1 = df[df["destination"].isin(group1_codes)]
         df2 = df[df["destination"].isin(group2_codes)]
-        df3 = df[df["destination"].isin(group3_codes)]
 
-        return df1, df2, df3
+        return df1, df2
 
-    dataset_packing_1, dataset_packing_2, dataset_packing_3 = split_by_destination_codes(df_packing)
+    dataset_packing_1, dataset_packing_2 = split_by_destination_codes(df_packing)
 
-    bar_chart_group = ct.grouped_bar_chart(
+    bar_chart_group = ct.grouped_bar_chart_dest(
         df=dataset_packing_1, source="destination", boundaries=boundaries, legend_param=False
     )
-    x_position = (pdf.epw - pdf.eph / 2.1) / 2
+    x_position = (pdf.epw - pdf.eph / 2.2) / 2
     # x_position = page_params["margin"]["left"]
 
-    pdf.image(bar_chart_group, x=x_position, w=pdf.epw / 1.3)
+    pdf.image(bar_chart_group, x=x_position, w=pdf.epw / 1.4)
 
-    bar_chart_group = ct.grouped_bar_chart(
-        df=dataset_packing_2, source="destination", boundaries=boundaries, legend_param=False
+    bar_chart_group = ct.grouped_bar_chart_dest(
+        df=dataset_packing_2, source="destination", boundaries=boundaries, legend_param=True
     )
-    pdf.image(bar_chart_group, x=x_position, w=pdf.epw / 1.3)
-
-    bar_chart_group = ct.grouped_bar_chart(df=dataset_packing_3, source="destination", boundaries=boundaries)
-    pdf.image(bar_chart_group, x=x_position, w=pdf.epw / 1.3)
+    pdf.image(bar_chart_group, x=x_position, w=pdf.epw / 1.4)
 
     destination_bar_chart = "This chart shows data quality issues across different destination. It groups entries as Normal (meeting standards), Abnormal Above (too high), and Abnormal Below (too low). This helps spot which places have specific types of data problems."
     pdf.set_font("montserrat", "", 7)
-    pdf.set_text_color(150, 150, 150)
+    pdf.set_text_color(colors["light_text"])
     pdf.set_y(pdf.get_y())
     pdf.set_x(page_params["margin"]["left"])
     pdf.multi_cell(page_params["width"] - 30, 3, destination_bar_chart)
 
-    return pdf.output(dest="S")
-    # pdf.output("abnomal.pdf")
+    return pdf.output()
+    # pdf.output("abnomal.pdf", dest="S")
 
 
 # =====================================================================================================================
-# years = ["2023", "2024"]
-# full_abnormal_cal_impl = pd.read_excel("in_house_data.xlsx")
-# abnormal_cal_out = pd.read_excel("out_house_data.xlsx")
-# abnormal_cal_packing = pd.read_excel("packing_data.xlsx")
+years = ["2023", "2024"]
+full_abnormal_cal_impl = pd.read_excel("pdf_test_data/in_house_data.xlsx")
+abnormal_cal_out = pd.read_excel("pdf_test_data/out_house_data.xlsx")
+abnormal_cal_packing = pd.read_excel("pdf_test_data/packing_data.xlsx")
 
-# generate_pdf_report(
-#     years=years,
-#     df_inhouse=full_abnormal_cal_impl,
-#     df_outhouse=abnormal_cal_out,
-#     df_packing=abnormal_cal_packing,
-#     boundaries="5",
-# )
+generate_pdf_report(
+    years=years,
+    df_inhouse=full_abnormal_cal_impl,
+    df_outhouse=abnormal_cal_out,
+    df_packing=abnormal_cal_packing,
+    boundaries=5,
+)
 
-# primary=(34,48,63)
-# secondary=(57,74,86)
-# third=(44,100,133)
-# fourth=(143,191,218)
-# background=(231,232,231)
+# primary = (34, 48, 63)
+# secondary = (57, 74, 86)
+# third = (44, 100, 133)
+# fourth = (143, 191, 218)
+# background = (231, 232, 231)

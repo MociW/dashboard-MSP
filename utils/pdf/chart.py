@@ -79,7 +79,7 @@ def grouped_bar_chart(
     fig.update_layout(
         showlegend=legend_param,
         barmode="group",
-        xaxis_tickangle=-45,
+        # xaxis_tickangle=-45,
         yaxis=dict(
             visible=False,
             showticklabels=True,
@@ -98,6 +98,7 @@ def grouped_bar_chart(
         ),
         height=height,
         width=width,
+        font=dict(size=14),
     )
 
     image_data = fig.to_image(format="png", engine="kaleido")
@@ -154,6 +155,7 @@ def single_pie_chart(df, boundaries, column_status, title, height=400, width=400
             "yanchor": "top",
             "xanchor": "center",
         },
+        font=dict(size=14),
     )
 
     # Update hover info
@@ -228,8 +230,106 @@ def grouped_pie_chart(df, boundaries, width=900, height=300):
         margin=dict(t=30, b=50, l=20, r=20),
         height=height,
         width=width,
+        font=dict(size=14),
     )
 
     # Save as PNG with transparent background
+    image_data = fig.to_image(format="png", engine="kaleido")
+    return io.BytesIO(image_data)
+
+
+def grouped_bar_chart_dest(
+    df: pd.DataFrame, source, boundaries: str, width: int = 800, height: int = 480, legend_param=True
+):
+    # Get unique sources
+    sources = df[source].unique()
+
+    # Count total items per source to determine sorting
+    source_counts = {}
+    for i in sources:
+        source_counts[i] = df[df[source] == i].shape[0]
+
+    # Sort sources by total count (descending)
+    sources = sorted(sources, key=lambda x: source_counts[x], reverse=True)
+
+    # Calculate percentages by source
+    normal_percentages = []
+    abnormal_percentages = []
+
+    for i in sources:
+        source_data = df[df[source] == i]
+        total_count = source_data.shape[0]
+
+        # Count normal statuses
+        normal_count = source_data[source_data["Status"] == "Normal"].shape[0]
+        normal_percentage = (normal_count / total_count * 100) if total_count > 0 else 0
+        normal_percentages.append(normal_percentage)
+
+        # Count and combine both abnormal statuses (above and below)
+        above_count = source_data[source_data["Status"] == f"Abnormal Above {boundaries}%"].shape[0]
+        below_count = source_data[source_data["Status"] == f"Abnormal Below -{boundaries}%"].shape[0]
+        abnormal_count = above_count + below_count
+        abnormal_percentage = (abnormal_count / total_count * 100) if total_count > 0 else 0
+        abnormal_percentages.append(abnormal_percentage)
+
+    # Create a figure
+    fig = go.Figure()
+
+    # Add the normal percentage bar trace
+    fig.add_trace(
+        go.Bar(
+            x=sources,
+            y=normal_percentages,
+            name="Normal",
+            marker_color="rgb(57,74,86)",
+            text=[f"{percentage:.1f}%" if percentage > 0 else "" for percentage in normal_percentages],
+            textposition="outside",
+        )
+    )
+
+    # Add the combined abnormal percentage bar trace
+    fig.add_trace(
+        go.Bar(
+            x=sources,
+            y=abnormal_percentages,
+            name=f"Abnormal (±{boundaries}%)",
+            marker_color="rgb(255, 0, 0)",
+            text=[f"{percentage:.1f}%" if percentage > 0 else "" for percentage in abnormal_percentages],
+            textposition="outside",
+        )
+    )
+    if legend_param:
+        mb = 50
+    else:
+        mb = 20
+
+    # Update the layout
+    fig.update_layout(
+        showlegend=legend_param,
+        barmode="group",
+        # xaxis_tickangle=-45,
+        yaxis=dict(
+            title="Percentage (%)",
+            visible=True,
+            showticklabels=True,
+            showgrid=False,
+            zeroline=True,
+            range=[0, 110],
+        ),
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        margin=dict(t=0, b=mb, l=60, r=0),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=-0.15,
+            xanchor="center",
+            x=0.5,
+        ),
+        height=height,
+        width=width,
+        font=dict(size=14),
+    )
+
     image_data = fig.to_image(format="png", engine="kaleido")
     return io.BytesIO(image_data)

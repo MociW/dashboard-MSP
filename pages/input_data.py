@@ -46,7 +46,7 @@ if st.session_state["authentication_status"]:
     if submit_button:
         if uploaded_file is not None:
             project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-            config_path = os.path.join(project_root, "database-dev.yaml")
+            config_path = os.path.join(project_root, "config/database-dev.yaml")
             config = conn.load_config(config_path)
             if not config:
                 st.error("Failed to load configuration. Exiting.")

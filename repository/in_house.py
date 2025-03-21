@@ -124,9 +124,24 @@ def update_in_house_data(excel_file, db_connection):
                         detail_id = detail_result[0]
                         cursor.execute(
                             """
-                            UPDATE "in_house_detail"
-                            SET "price" = %s, "status" = %s
-                            WHERE "id" = %s
+                            UPDATE
+                                "in_house_detail"
+                            SET
+                                "jsp" = %s,
+                                "msp" = %s,
+                                "local_oh" = %s,
+                                "tooling_oh" = %s,
+                                "raw_material" = %s,
+                                "labor" = %s,
+                                "foh_fixed" = %s,
+                                "foh_var" = %s,
+                                "unfinish_depre"= %s,
+                                "total_process_cost" = %s,
+                                "exclusive_investment"= %s,
+                                "total_cost" = %s,
+                                "status" = %s
+                            WHERE
+                                "id" = %s
                             """,
                             (
                                 round(row["jsp"], 0),

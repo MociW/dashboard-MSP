@@ -11,6 +11,7 @@ import utils.sql_out_house as uo
 import utils.visualize as uv
 import utils.formatting as uf
 import utils.pdf.generate_pdf as ag
+import repository.approve as ra
 import os
 
 # Page configuration
@@ -22,7 +23,7 @@ st.header("🗒️ DASHBOARD ABNORMALITY MANAGEMENT - PBMD")
 # Authentication setup
 @st.cache_resource
 def load_config():
-    with open("config.yaml", "r", encoding="utf-8") as file:
+    with open("config/config.yaml", "r", encoding="utf-8") as file:
         return yaml.load(file, Loader=SafeLoader)
 
 
@@ -160,6 +161,7 @@ try:
 
     # Generate Excel files
     df_generate = abnormal_cal_impl.drop("Status Abnormal", axis=1)
+    df_generate = df_generate.drop("Explanation Status", axis=1)
     generate_excel = uf.convert_to_excel_in_house(
         df_generate, input_previous_year, input_current_year, int(input_abnormal)
     )
@@ -196,6 +198,133 @@ try:
     # Display pie charts for all categories
     for category_name, category_data in abnormal_categories.items():
         uv.pie_char_with_total_counts(category_data, category_name, input_abnormal)
+
+    n = st.columns(2, gap="medium")
+    # Left column - Top 10 Above
+    with n[0]:
+        st.markdown(f"### Top 10 Above {input_abnormal}%")
+
+        # Get top 10 above data
+        top_10_above = (
+            full_abnormal_cal_impl.dropna(subset=["Gap Total Cost"])
+            .drop("Status", axis=1, errors="ignore")
+            .sort_values("Gap Total Cost", ascending=False)
+            .head(10)
+        )
+        top_10_above = top_10_above[
+            [
+                "part_no",
+                "part_name",
+                f"Total Cost {input_previous_year}",
+                f"Total Cost {input_current_year}",
+                "Gap Total Cost",
+            ]
+        ]
+        # Create a container with styling
+        st.dataframe(
+            top_10_above,
+            column_config={
+                "Gap Total Cost": st.column_config.NumberColumn(
+                    "Gap Total Cost (%)", format="%.2f%%", help="Percentage difference from expected price"
+                ),
+                f"Total Cost {input_previous_year}": st.column_config.NumberColumn(
+                    f"Total Cost {input_previous_year} (Rp)", format="Rp %.0f"
+                ),
+                f"Total Cost {input_current_year}": st.column_config.NumberColumn(
+                    f"Total Cost {input_current_year} (Rp)", format="Rp %.0f"
+                ),
+            },
+            use_container_width=True,
+            hide_index=False,
+        )
+
+        with st.container(border=True):
+            # Display metrics for the first entry if available
+            if not top_10_above.empty:
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric(
+                        label=f"Total Cost {input_previous_year}",
+                        value=f"Rp {top_10_above[f'Total Cost {input_previous_year}'].iloc[0]:,.0f}",
+                    )
+
+                with col2:
+                    # Use the correct column name for current price
+                    st.metric(
+                        label="Highest Gap",
+                        value=f"{top_10_above['Gap Total Cost'].iloc[0]:.2f}%",
+                        delta=f"{top_10_above['Gap Total Cost'].iloc[0] - float(input_abnormal):.2f}%",
+                        delta_color="inverse",
+                    )
+                with col3:
+                    # Use the correct column name for current price
+                    st.metric(
+                        label=f"Total Cost {input_current_year}",
+                        value=f"Rp {top_10_above[f'Total Cost {input_current_year}'].iloc[0]:,.0f}",
+                    )
+
+    with n[1]:
+        st.markdown(f"### Top 10 Below -{input_abnormal}%")
+
+        # Get top 10 below data
+        top_10_below = (
+            full_abnormal_cal_impl.dropna(subset=["Gap Total Cost"])
+            .drop("Status", axis=1, errors="ignore")
+            .sort_values("Gap Total Cost")
+            .head(10)
+        )
+
+        top_10_below = top_10_below[
+            [
+                "part_no",
+                "part_name",
+                f"Total Cost {input_previous_year}",
+                f"Total Cost {input_current_year}",
+                "Gap Total Cost",
+            ]
+        ]
+
+        st.dataframe(
+            top_10_below,
+            column_config={
+                "Gap Total Cost": st.column_config.NumberColumn(
+                    "Gap Total Cost (%)", format="%.2f%%", help="Percentage difference from expected price"
+                ),
+                f"Total Cost {input_previous_year}": st.column_config.NumberColumn(
+                    f"Total Cost {input_previous_year} (Rp)", format="Rp %.0f"
+                ),
+                f"Total Cost {input_current_year}": st.column_config.NumberColumn(
+                    f"Total Cost {input_current_year} (Rp)", format="Rp %.0f"
+                ),
+            },
+            use_container_width=True,
+            hide_index=False,
+        )
+
+        # Create a container with styling
+        with st.container(border=True):
+            # Display metrics for the first entry if available
+            if not top_10_below.empty:
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric(
+                        label=f"Total Cost {input_previous_year}",
+                        value=f"Rp {top_10_below[f'Total Cost {input_previous_year}'].iloc[0]:,.0f}",
+                    )
+
+                with col2:
+                    st.metric(
+                        label="Lowest Gap",
+                        value=f"{top_10_below['Gap Total Cost'].iloc[0]:.2f}%",
+                        delta=f"{top_10_below['Gap Total Cost'].iloc[0] + float(input_abnormal):.2f}%",
+                        delta_color="normal",
+                    )
+
+                with col3:
+                    st.metric(
+                        label=f"Total Cost {input_current_year}",
+                        value=f"Rp {top_10_below[f'Total Cost {input_current_year}'].iloc[0]:,.0f}",
+                    )
     # Display download buttons
     display_download_buttons(generate_excel, generate_excel_filtered, "in_house")
 
@@ -232,10 +361,11 @@ try:
     # Process data
     status_counts_out = status_items_out["Status"].value_counts()
     abnormal_counts_out = abnormal_cal_out["Status"].value_counts()
-    explain_cal_counts_out = abnormal_cal_impl["Explanation Status"].value_counts()
+    explain_cal_counts_out = abnormal_cal_out["Explanation Status"].value_counts()
 
     # Generate Excel files
     df_generate_out = abnormal_cal_out.drop("Status", axis=1)
+    df_generate_out = df_generate_out.drop("Explanation Status", axis=1)
     generate_excel_out = uf.convert_to_excel_format_out_house(
         df_generate_out, input_previous_year, input_current_year, int(input_abnormal)
     )
@@ -245,6 +375,7 @@ try:
         abnormal_cal_out["Status"] == f"Abnormal Below -{input_abnormal}%"
     )
     abnormal_filtered_out = abnormal_cal_out[abnormal_filter].drop("Status", axis=1)
+    abnormal_filtered_out = abnormal_filtered_out.drop("Explanation Status", axis=1)
     generate_excel_filtered_out = uf.convert_to_excel_format_out_house(
         abnormal_filtered_out, input_previous_year, input_current_year, int(input_abnormal)
     )
@@ -456,7 +587,7 @@ try:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     with cols[2]:
-        st.subheader("Filtered Excel")
+        st.subheader("Filtered Per Part Excel")
         st.download_button(
             label="Download Excel File",
             data=generate_excel_per_part,
@@ -572,28 +703,176 @@ try:
         cols[2].metric("Above Threshold", f"{abnormal_above} ({abnormal_above / total_items * 100:.1f}%)")
         cols[3].metric("Below Threshold", f"{abnormal_below} ({abnormal_below / total_items * 100:.1f}%)")
 
+    n = st.columns(2, gap="medium")
+
+    # Left column - Top 10 Above
+    with n[0]:
+        st.markdown(f"### Top 10 Above {input_abnormal}%")
+
+        # Get top 10 above data
+        top_10_above = (
+            filtered_data.dropna(subset=["Gap Total Cost"])
+            .drop("Status", axis=1, errors="ignore")
+            .sort_values("Gap Total Cost", ascending=False)
+            .head(10)
+        )
+        top_10_above = top_10_above[
+            [
+                "part_no",
+                "part_name",
+                "destination",
+                f"Max Total Cost {input_previous_year}",
+                f"Max Total Cost {input_current_year}",
+                "Gap Total Cost",
+            ]
+        ]
+        # Create a container with styling
+        st.dataframe(
+            top_10_above,
+            column_config={
+                "Gap Total Cost": st.column_config.NumberColumn(
+                    "Gap Total Cost (%)", format="%.2f%%", help="Percentage difference from expected price"
+                ),
+                f"Max Total Cost {input_previous_year}": st.column_config.NumberColumn(
+                    f"Total Cost {input_previous_year} (Rp)", format="Rp %.0f"
+                ),
+                f"Max Total Cost {input_current_year}": st.column_config.NumberColumn(
+                    f"Total Cost {input_current_year} (Rp)", format="Rp %.0f"
+                ),
+            },
+            use_container_width=True,
+            hide_index=False,
+        )
+
+        with st.container(border=True):
+            # Display metrics for the first entry if available
+            if not top_10_above.empty:
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric(
+                        label=f"Total Cost {input_previous_year}",
+                        value=f"Rp {top_10_above[f'Max Total Cost {input_previous_year}'].iloc[0]:,.0f}",
+                    )
+
+                with col2:
+                    # Use the correct column name for current price
+                    st.metric(
+                        label="Highest Gap",
+                        value=f"{top_10_above['Gap Total Cost'].iloc[0]:.2f}%",
+                        delta=f"{top_10_above['Gap Total Cost'].iloc[0] - float(input_abnormal):.2f}%",
+                        delta_color="inverse",
+                    )
+                with col3:
+                    # Use the correct column name for current price
+                    st.metric(
+                        label=f"Total Cost {input_current_year}",
+                        value=f"Rp {top_10_above[f'Max Total Cost {input_current_year}'].iloc[0]:,.0f}",
+                    )
+
+    with n[1]:
+        st.markdown(f"### Top 10 Below -{input_abnormal}%")
+
+        # Get top 10 below data
+        top_10_below = (
+            filtered_data.dropna(subset=["Gap Total Cost"])
+            .drop("Status", axis=1, errors="ignore")
+            .sort_values("Gap Total Cost")
+            .head(10)
+        )
+
+        top_10_below = top_10_below[
+            [
+                "part_no",
+                "part_name",
+                "destination",
+                f"Max Total Cost {input_previous_year}",
+                f"Max Total Cost {input_current_year}",
+                "Gap Total Cost",
+            ]
+        ]
+
+        st.dataframe(
+            top_10_below,
+            column_config={
+                "Gap Total Cost": st.column_config.NumberColumn(
+                    "Gap Total Cost (%)", format="%.2f%%", help="Percentage difference from expected price"
+                ),
+                f"Max Total Cost {input_previous_year}": st.column_config.NumberColumn(
+                    f"Total Cost {input_previous_year} (Rp)", format="Rp %.0f"
+                ),
+                f"Max Total Cost {input_current_year}": st.column_config.NumberColumn(
+                    f"Total Cost {input_current_year} (Rp)", format="Rp %.0f"
+                ),
+            },
+            use_container_width=True,
+            hide_index=False,
+        )
+
+        # Create a container with styling
+        with st.container(border=True):
+            # Display metrics for the first entry if available
+            if not top_10_below.empty:
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric(
+                        label=f"Total Cost {input_previous_year}",
+                        value=f"Rp {top_10_below[f'Max Total Cost {input_previous_year}'].iloc[0]:,.0f}",
+                    )
+
+                with col2:
+                    st.metric(
+                        label="Lowest Gap",
+                        value=f"{top_10_below['Gap Total Cost'].iloc[0]:.2f}%",
+                        delta=f"{top_10_below['Gap Total Cost'].iloc[0] + float(input_abnormal):.2f}%",
+                        delta_color="normal",
+                    )
+
+                with col3:
+                    st.metric(
+                        label=f"Total Cost {input_current_year}",
+                        value=f"Rp {top_10_below[f'Max Total Cost {input_current_year}'].iloc[0]:,.0f}",
+                    )
+
     # Display download buttons
     display_download_buttons(generate_excel_packing, generate_excel_filtered_packing, "packing")
 except Exception as e:
     if "KeyError" in str(e):
         st.warning("There was an issue with your database query. Please check your input parameters.")
 
-st.divider()
-st.subheader("PDF")
-if st.button("Generate PDF"):
-    with st.spinner("Generating PDF..."):
-        pdf_data = ag.generate_pdf_report(
-            years=years,
-            df_inhouse=full_abnormal_cal_impl,
-            df_outhouse=abnormal_cal_out,
-            df_packing=abnormal_cal_packing,
-            boundaries=input_abnormal,
-        )
+allowed_update_roles = ["archmagus", "oracles"]
+if st.session_state["roles"][0] in allowed_update_roles:
+    st.divider()
+    col = st.columns(2, border=True)
+    with col[0]:
+        st.subheader("Abnormality Report")
+        if st.button("Generate PDF"):
+            with st.spinner("Generating PDF..."):
+                pdf_data = ag.generate_pdf_report(
+                    years=years,
+                    df_inhouse=full_abnormal_cal_impl,
+                    df_outhouse=abnormal_cal_out,
+                    df_packing=abnormal_cal_packing,
+                    boundaries=input_abnormal,
+                )
 
-        pdf_bytes = bytes(pdf_data)
-        st.download_button(
-            label="Download PDF Report",
-            data=pdf_bytes,
-            file_name=f"Report Abnomality {input_current_year}-{input_previous_year}.pdf",
-            mime="application/pdf",
-        )
+                pdf_bytes = bytes(pdf_data)
+                st.download_button(
+                    label="Download PDF Report",
+                    data=pdf_bytes,
+                    file_name=f"Report Abnomality {input_current_year}-{input_previous_year}.pdf",
+                    mime="application/pdf",
+                )
+    with col[1]:
+        st.subheader("Approve All Normal Data")
+        if st.button("Approve", use_container_width=False):
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+            config_path = os.path.join(project_root, "config/database-dev.yaml")
+            config = conn.load_config(config_path)
+            if not config:
+                st.error("Failed to load configuration. Exiting.")
+            else:
+                db_connection = conn.DatabaseConnection(config["database"])
+                try:
+                    ra.approve_normal_data(db_connection=db_connection)
+                except Exception:
+                    st.error("❌ Failed to approve the Normal data")
