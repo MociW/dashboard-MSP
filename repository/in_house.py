@@ -2,24 +2,39 @@ import pandas as pd
 import psycopg2
 import psycopg2.extras
 import uuid
-
 psycopg2.extras.register_uuid()
 
 
 def input_in_house_new_data(excel_file, db_connection):
-    # Read the Excel file
+    # Read the Excel file - ensure string conversion for part_no
     df = pd.read_excel(excel_file)
+
+    # Explicitly convert part_no to string to avoid type errors
+    df['part_no'] = df['part_no'].astype(str)
+
+    failed_parts = []  # List to store failed part numbers
+    success_count = 0  # Counter for successful updates
+    skipped_count = 0  # Counter for skipped entries
+
     # Connect to PostgreSQL
     with db_connection as connection:
         with connection.cursor() as cursor:
             for index, row in df.iterrows():
                 try:
+                    part_no = str(row["part_no"])
+                    if len(part_no) > 10:
+                        failed_parts.append(
+                            {"part_no": part_no, "row": index + 1,
+                             "error": "Part number exceeds maximum length (10 characters)"}
+                        )
+                        continue
+
                     # Check if part_no already exists
                     cursor.execute(
                         """
                         SELECT "id" FROM "in_house" WHERE "part_no" = %s
                         """,
-                        (row["part_no"],),
+                        (part_no,),
                     )
                     result = cursor.fetchone()
 
@@ -36,39 +51,72 @@ def input_in_house_new_data(excel_file, db_connection):
                             INSERT INTO "in_house" ("id", "part_no", "part_name")
                             VALUES (%s, %s, %s) 
                             """,
-                            (inserted_uuid, row["part_no"], row["part_name"]),
+                            (inserted_uuid, part_no, row["part_name"]),
                         )
 
-                    # Insert into in_house_detail
+                    # Check if the part number and year combination already exists
                     cursor.execute(
                         """
-                        INSERT INTO "in_house_detail" ("in_house_item", "jsp", "msp", "local_oh", "tooling_oh",
-                        "raw_material", "labor", "foh_fixed", "foh_var", "unfinish_depre", "total_process_cost",
-                        "exclusive_investment", "total_cost", "year_item", "created_at")
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,%s, CURRENT_TIMESTAMP)
+                        SELECT "id" FROM "in_house_detail" 
+                        WHERE "in_house_item" = %s AND "year_item" = %s
+                        """,
+                        (inserted_uuid, row["year"]),
+                    )
+
+                    existing_entry = cursor.fetchone()
+
+                    if existing_entry:
+                        # Skip if the entry already exists
+                        skipped_count += 1
+                        print(f"Skipping entry for part {part_no} in year {row['year']} - Already exists")
+                        continue
+
+                    # Insert into in_house_detail with proper rounding
+                    cursor.execute(
+                        """
+                        INSERT INTO "in_house_detail" ("in_house_item","lva","non_lva","tooling","process_cost","total_cost", "year_item", "created_at")
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
                         """,
                         (
                             inserted_uuid,
-                            round(row["jsp"], 0),
-                            round(row["msp"], 0),
-                            round(row["local_oh"], 0),
-                            round(row["tooling_oh"], 0),
-                            round(row["raw_material"], 0),
-                            round(row["labor"], 0),
-                            round(row["foh_fixed"], 0),
-                            round(row["foh_var"], 0),
-                            round(row["unfinish_depre"], 0),
-                            round(row["total_process_cost"], 0),
-                            round(row["exclusive_investment"], 0),
-                            round(row["total_cost"], 0),
+                            # round(float(row["jsp"]), 0),
+                            # round(float(row["msp"]), 0),
+                            # round(float(row["local_oh"]), 0),
+                            # round(float(row["tooling_oh"]), 0),
+                            # round(float(row["raw_material"]), 0),
+                            # round(float(row["labor"]), 0),
+                            # round(float(row["foh_fixed"]), 0),
+                            # round(float(row["foh_var"]), 0),
+                            # round(float(row["unfinish_depre"]), 0),
+                            # round(float(row["total_process_cost"]), 0),
+                            # round(float(row["exclusive_investment"]), 0),
+                            round(float(row["lva"]), 0),
+                            round(float(row["non_lva"]), 0),
+                            round(float(row["tooling"]), 0),
+                            round(float(row["process_cost"]), 0),
+                            round(float(row["lva"] + row["non_lva"] + row["tooling"] + row["process_cost"]), 0),
                             row["year"],
                         ),
                     )
-                    db_connection.connection.commit()
+
+                    connection.commit()
+                    success_count += 1
 
                 except Exception as e:
-                    print(f"Error inserting row {index + 1}: {e}")
-                    db_connection.connection.rollback()
+                    error_message = f"Error processing row {index + 1} for part {row.get('part_no', 'unknown')}: {e}"
+                    print(error_message)
+                    failed_parts.append({"part_no": row.get("part_no", "unknown"), "row": index + 1, "error": str(e)})
+                    connection.rollback()
+
+    # Print summary of operation
+    print("Operation Summary:")
+    print(f"Total rows processed: {len(df)}")
+    print(f"Successful insertions: {success_count}")
+    print(f"Skipped entries: {skipped_count}")
+    print(f"Failed entries: {len(failed_parts)}")
+
+    # Return details for further processing if needed
+    return {"total": len(df), "success": success_count, "failed": len(failed_parts), "failed_parts": failed_parts}
 
 
 def update_in_house_data(excel_file, db_connection):
@@ -95,7 +143,7 @@ def update_in_house_data(excel_file, db_connection):
 
                         cursor.execute(
                             """
-                            INSERT INTO "out_house" ("id", "part_no", "part_name")
+                            INSERT INTO "in_house" ("id", "part_no", "part_name")
                             VALUES (%s, %s, %s) 
                             """,
                             (inserted_uuid, row["part_no"], row["part_name"]),
@@ -127,34 +175,20 @@ def update_in_house_data(excel_file, db_connection):
                             UPDATE
                                 "in_house_detail"
                             SET
-                                "jsp" = %s,
-                                "msp" = %s,
-                                "local_oh" = %s,
-                                "tooling_oh" = %s,
-                                "raw_material" = %s,
-                                "labor" = %s,
-                                "foh_fixed" = %s,
-                                "foh_var" = %s,
-                                "unfinish_depre"= %s,
-                                "total_process_cost" = %s,
-                                "exclusive_investment"= %s,
+                                "lva" = %s,                               
+                                "non_lva" = %s,                               
+                                "tooling" = %s,                               
+                                "process_cost" = %s,                               
                                 "total_cost" = %s,
                                 "status" = %s
                             WHERE
                                 "id" = %s
                             """,
                             (
-                                round(row["jsp"], 0),
-                                round(row["msp"], 0),
-                                round(row["local_oh"], 0),
-                                round(row["tooling_oh"], 0),
-                                round(row["raw_material"], 0),
-                                round(row["labor"], 0),
-                                round(row["foh_fixed"], 0),
-                                round(row["foh_var"], 0),
-                                round(row["unfinish_depre"], 0),
-                                round(row["total_process_cost"], 0),
-                                round(row["exclusive_investment"], 0),
+                                round(float(row["lva"]), 0),
+                                round(float(row["non_lva"]), 0),
+                                round(float(row["tooling"]), 0),
+                                round(float(row["process_cost"]), 0),
                                 round(row["total_cost"], 0),
                                 status,
                                 detail_id,
@@ -175,6 +209,7 @@ def update_in_house_data(excel_file, db_connection):
 
                     connection.commit()
                     success_count += 1
+
 
                 except Exception as e:
                     error_message = f"Error updating row {index + 1} for part {row.get('part_no', 'unknown')}: {e}"

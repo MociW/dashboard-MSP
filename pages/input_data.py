@@ -5,6 +5,7 @@ import repository.in_house as ri
 import repository.packing as rp
 import pandas as pd
 import os
+import io
 
 # Initialize session state variables if they don't exist
 if "authentication_status" not in st.session_state:
@@ -80,11 +81,17 @@ if st.session_state["authentication_status"]:
                             with st.expander("View Failed Records"):
                                 st.dataframe(failed_df)
 
-                                # Add option to download failed records as CSV
-                                excel = failed_df.to_excel(index=False)
+                                buffer = io.BytesIO()
+                                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                                    failed_df.to_excel(writer, index=False, sheet_name='Failed Records')
+
+                                # Reset the buffer position to the beginning
+                                buffer.seek(0)
+
+                                # Offer the Excel download button
                                 st.download_button(
                                     label="Download Failed Records Excel",
-                                    data=excel,
+                                    data=buffer,
                                     file_name="failed_imports.xlsx",
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 )

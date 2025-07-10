@@ -1,4 +1,5 @@
 
+
 import pandas as pd
 import warnings
 from typing import List
@@ -7,15 +8,13 @@ from typing import List
 from utils.pdf.pdf_factory import generate_report
 
 
-def generate_pdf_report(
+def generate_pdf_report_in_house(
         years: List[str],
         df_inhouse: pd.DataFrame,
-        df_outhouse: pd.DataFrame,
-        df_packing: pd.DataFrame,
         boundaries: List[int],
 ):
     """
-    Generate a complete PDF report with in-house, out-house, and packing data.
+    Generate an In-House PDF report.
     
     This function is deprecated and will be removed in a future version.
     Please use the new API instead:
@@ -24,27 +23,23 @@ def generate_pdf_report(
     from utils.pdf import generate_report
     
     pdf_bytes = generate_report(
-        "complete",
+        "in_house",
         years=["2023", "2024"],
         df_inhouse=df_inhouse,
-        df_outhouse=df_outhouse,
-        df_packing=df_packing,
-        boundaries=[5, 6, 7]
+        boundaries=[5]
     )
     ```
     
     Args:
         years: A list containing start and end years for the report period.
         df_inhouse: DataFrame containing in-house data.
-        df_outhouse: DataFrame containing out-house data.
-        df_packing: DataFrame containing packing data.
         boundaries: A list of boundary percentages for abnormality detection.
             
     Returns:
         bytes: The generated PDF as bytes.
     """
     warnings.warn(
-        "generate_pdf_report is deprecated and will be removed in a future version. "
+        "generate_pdf_report_in_house is deprecated and will be removed in a future version. "
         "Please use from utils.pdf import generate_report instead.",
         DeprecationWarning,
         stacklevel=2
@@ -52,11 +47,9 @@ def generate_pdf_report(
     
     # Delegate to the new implementation
     return generate_report(
-        "complete",
+        "in_house",
         years=years,
         df_inhouse=df_inhouse,
-        df_outhouse=df_outhouse,
-        df_packing=df_packing,
         boundaries=boundaries
     )
 

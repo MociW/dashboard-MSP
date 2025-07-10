@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import yaml
+
 from yaml.loader import SafeLoader
 import streamlit_authenticator as stauth
 from streamlit_authenticator.utilities import LoginError
@@ -10,9 +11,12 @@ import utils.sql_packing as up
 import utils.sql_out_house as uo
 import utils.visualize as uv
 import utils.formatting as uf
-import utils.pdf.generate_pdf as ag
+# import utils.pdf.generate_pdf as ag
+from utils.pdf import generate_report
 import repository.approve as ra
 import os
+import repository.psql.conn as rc
+from datetime import datetime
 
 # Page configuration
 st.set_page_config(page_title="TMMIN PBMD - Dashboard", layout="wide")
@@ -65,20 +69,29 @@ if st.session_state["authentication_status"]:
         col1, col2 = st.columns(2)
         input_previous_year = col1.text_input("Input Previous Year")
         input_current_year = col2.text_input("Input Current Year")
-        input_abnormal = st.text_input("Abnormal Boundaries (%)")
+        in_house_input_abnormal = st.text_input("In House Abnormal Boundaries (%)")
+        out_house_input_abnormal = st.text_input("Out House Abnormal Boundaries (%)")
+        packing_input_abnormal = st.text_input("Packing Abnormal Boundaries (%)")
+
         submit_button = st.form_submit_button(label="Submit", type="primary")
 
         if submit_button:
             st.session_state["years"] = [input_previous_year, input_current_year]
-            st.session_state["input_abnormal"] = input_abnormal
+            st.session_state["in_house_input_abnormal"] = in_house_input_abnormal
+            st.session_state["out_house_input_abnormal"] = out_house_input_abnormal
+            st.session_state["packing_input_abnormal"] = packing_input_abnormal
+
     # Check if required session state data exists
-    if not all(key in st.session_state for key in ["years", "input_abnormal"]):
+    if not all(key in st.session_state for key in
+               ["years", "in_house_input_abnormal", "out_house_input_abnormal", "packing_input_abnormal"]):
         st.warning("Please submit the form above to continue")
         st.stop()
 
     # Extract common values
     years = st.session_state["years"]
-    input_abnormal = st.session_state["input_abnormal"]
+    in_house_input_abnormal = st.session_state["in_house_input_abnormal"]
+    out_house_input_abnormal = st.session_state["out_house_input_abnormal"]
+    packing_input_abnormal = st.session_state["packing_input_abnormal"]
     input_previous_year, input_current_year = years
 
 elif st.session_state["authentication_status"] is False:
@@ -130,19 +143,23 @@ def get_in_house_data(years, abnormal_threshold):
         status_items = conn.query(us.status_product_two_year(years))
         abnormal_cal = conn.query(us.abnormal_cal(years, abnormal_threshold))
         full_abnormal_cal = conn.query(us.full_abnormal_cal(years, abnormal_threshold))
-        return status_items, abnormal_cal, full_abnormal_cal
+        abnormal_cal_in_house = conn.query(us.abnormal_cal_in_house_per_part(years))
+        return status_items, abnormal_cal, full_abnormal_cal, abnormal_cal_in_house
     except Exception as e:
         # st.warning(e)
         if "sqlalchemy.exc.ProgrammingError" in str(e) or "psycopg2.errors.SyntaxError" in str(e):
             st.warning("There was an issue with your database query. Please check your input parameters.")
             return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
         else:
-            raise e
+            st.warning(e)
+            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
 
 try:
     # Get in-house data
-    status_items_impl, abnormal_cal_impl, full_abnormal_cal_impl = get_in_house_data(years, input_abnormal)
+    status_items_impl, abnormal_cal_impl, full_abnormal_cal_impl, abnormal_cal_in_house_per_part = get_in_house_data(
+        years,
+        in_house_input_abnormal)
 
     # Process data
     status_items_counts = status_items_impl["Status"].value_counts()
@@ -163,15 +180,18 @@ try:
     df_generate = abnormal_cal_impl.drop("Status Abnormal", axis=1)
     df_generate = df_generate.drop("Explanation Status", axis=1)
     generate_excel = uf.convert_to_excel_in_house(
-        df_generate, input_previous_year, input_current_year, int(input_abnormal)
+        df_generate, input_previous_year, input_current_year, int(in_house_input_abnormal)
     )
 
     abnormal_filtered = abnormal_cal_impl[abnormal_cal_impl["Status Abnormal"] == "Abnormal"].drop(
         "Status Abnormal", axis=1
-    )
+    ).drop("Explanation Status", axis=1)
     generate_excel_filtered = uf.convert_to_excel_in_house(
-        abnormal_filtered, input_previous_year, input_current_year, int(input_abnormal)
+        abnormal_filtered, input_previous_year, input_current_year, int(in_house_input_abnormal)
     )
+    generate_excel_per_part = uf.convert_to_excel_format_in_house_per_part(abnormal_cal_in_house_per_part,
+                                                                           input_previous_year, input_current_year,
+                                                                           int(in_house_input_abnormal))
 
     # Display metrics
     mc = st.columns(3, border=True)
@@ -197,12 +217,12 @@ try:
 
     # Display pie charts for all categories
     for category_name, category_data in abnormal_categories.items():
-        uv.pie_char_with_total_counts(category_data, category_name, input_abnormal)
+        uv.pie_char_with_total_counts(category_data, category_name, in_house_input_abnormal)
 
     n = st.columns(2, gap="medium")
     # Left column - Top 10 Above
     with n[0]:
-        st.markdown(f"### Top 10 Above {input_abnormal}%")
+        st.markdown(f"### Top 10 Above {in_house_input_abnormal}%")
 
         # Get top 10 above data
         top_10_above = (
@@ -253,7 +273,7 @@ try:
                     st.metric(
                         label="Highest Gap",
                         value=f"{top_10_above['Gap Total Cost'].iloc[0]:.2f}%",
-                        delta=f"{top_10_above['Gap Total Cost'].iloc[0] - float(input_abnormal):.2f}%",
+                        delta=f"{top_10_above['Gap Total Cost'].iloc[0] - float(in_house_input_abnormal):.2f}%",
                         delta_color="inverse",
                     )
                 with col3:
@@ -264,7 +284,7 @@ try:
                     )
 
     with n[1]:
-        st.markdown(f"### Top 10 Below -{input_abnormal}%")
+        st.markdown(f"### Top 10 Below -{in_house_input_abnormal}%")
 
         # Get top 10 below data
         top_10_below = (
@@ -316,7 +336,7 @@ try:
                     st.metric(
                         label="Lowest Gap",
                         value=f"{top_10_below['Gap Total Cost'].iloc[0]:.2f}%",
-                        delta=f"{top_10_below['Gap Total Cost'].iloc[0] + float(input_abnormal):.2f}%",
+                        delta=f"{top_10_below['Gap Total Cost'].iloc[0] + float(in_house_input_abnormal):.2f}%",
                         delta_color="normal",
                     )
 
@@ -326,11 +346,41 @@ try:
                         value=f"Rp {top_10_below[f'Total Cost {input_current_year}'].iloc[0]:,.0f}",
                     )
     # Display download buttons
-    display_download_buttons(generate_excel, generate_excel_filtered, "in_house")
+
+    section_name = "in_house"
+    cols = st.columns(3, border=True)
+    with cols[0]:
+        st.subheader("Full Excel")
+        st.download_button(
+            label="Download Excel File",
+            data=generate_excel,
+            file_name=f"{section_name}_{input_previous_year}_{input_current_year}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    with cols[1]:
+        st.subheader("Filtered Excel")
+        st.download_button(
+            label="Download Excel File",
+            data=generate_excel_filtered,
+            file_name=f"{section_name}_filtered_{input_previous_year}_{input_current_year}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    with cols[2]:
+        st.subheader("Filtered Per Part Excel")
+        st.download_button(
+            label="Download Excel File",
+            data=generate_excel_per_part,
+            file_name=f"{section_name}_per_part_{input_previous_year}_{input_current_year}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
 
 except Exception as e:
-    if "KeyError" in str(e):
-        st.warning("There was an issue with your database query. Please check your input parameters.")
+    st.warning(e)
+# if "KeyError" in str(e):
+#     st.warning("There was an issue with your database query. Please check your input parameters.")
+# else:
+#     print(e)
+#     st.error(e)
 
 # ======================================== OUT HOUSE ========================================
 st.divider()
@@ -351,12 +401,12 @@ def get_out_house_data(years, abnormal_threshold):
             st.warning("There was an issue with your database query. Please check your input parameters.")
             return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
         else:
-            raise e
+            return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
 
 try:
     # Get out house data
-    status_items_out, abnormal_cal_out, abnormal_cal_per_part_out = get_out_house_data(years, input_abnormal)
+    status_items_out, abnormal_cal_out, abnormal_cal_per_part_out = get_out_house_data(years, out_house_input_abnormal)
 
     # Process data
     status_counts_out = status_items_out["Status"].value_counts()
@@ -367,21 +417,21 @@ try:
     df_generate_out = abnormal_cal_out.drop("Status", axis=1)
     df_generate_out = df_generate_out.drop("Explanation Status", axis=1)
     generate_excel_out = uf.convert_to_excel_format_out_house(
-        df_generate_out, input_previous_year, input_current_year, int(input_abnormal)
+        df_generate_out, input_previous_year, input_current_year, int(out_house_input_abnormal)
     )
 
     # Filter for abnormal items
-    abnormal_filter = (abnormal_cal_out["Status"] == f"Abnormal Above {input_abnormal}%") | (
-        abnormal_cal_out["Status"] == f"Abnormal Below -{input_abnormal}%"
+    abnormal_filter = (abnormal_cal_out["Status"] == f"Abnormal Above {out_house_input_abnormal}%") | (
+            abnormal_cal_out["Status"] == f"Abnormal Below -{out_house_input_abnormal}%"
     )
     abnormal_filtered_out = abnormal_cal_out[abnormal_filter].drop("Status", axis=1)
     abnormal_filtered_out = abnormal_filtered_out.drop("Explanation Status", axis=1)
     generate_excel_filtered_out = uf.convert_to_excel_format_out_house(
-        abnormal_filtered_out, input_previous_year, input_current_year, int(input_abnormal)
+        abnormal_filtered_out, input_previous_year, input_current_year, int(out_house_input_abnormal)
     )
 
     generate_excel_per_part = uf.convert_to_excel_format_out_house_per_part(
-        abnormal_cal_per_part_out, input_previous_year, input_current_year, int(input_abnormal)
+        abnormal_cal_per_part_out, input_previous_year, input_current_year, int(out_house_input_abnormal)
     )
 
     # Display metrics
@@ -393,7 +443,8 @@ try:
     with mc[1]:
         st.subheader("Abnormal Number")
         m = st.columns(3, gap="small")
-        statuses = [f"Abnormal Above {input_abnormal}%", "Normal", f"Abnormal Below -{input_abnormal}%"]
+        statuses = [f"Abnormal Above {out_house_input_abnormal}%", "Normal",
+                    f"Abnormal Below -{out_house_input_abnormal}%"]
         for i, status in enumerate(statuses):
             with m[i]:
                 st.metric(label=status, value=abnormal_counts_out.get(status, 0))
@@ -417,8 +468,8 @@ try:
             color=abnormal_counts_out.index,
             color_discrete_map={
                 "Normal": pastel_colors[0],
-                f"Abnormal Above {input_abnormal}%": pastel_colors[1],
-                f"Abnormal Below -{input_abnormal}%": pastel_colors[2],
+                f"Abnormal Above {out_house_input_abnormal}%": pastel_colors[1],
+                f"Abnormal Below -{out_house_input_abnormal}%": pastel_colors[2],
             },
         )
         fig.update_traces(textposition="inside", textinfo="percent+label")
@@ -428,7 +479,7 @@ try:
 
     # Left column - Top 10 Above
     with n[0]:
-        st.markdown(f"### Top 10 Above {input_abnormal}%")
+        st.markdown(f"### Top 10 Above {out_house_input_abnormal}%")
 
         # Get top 10 above data
         top_10_above = abnormal_cal_out.dropna(subset=["Gap Price"]).drop("Status", axis=1, errors="ignore").head(10)
@@ -465,7 +516,7 @@ try:
                     st.metric(
                         label="Highest Gap",
                         value=f"{top_10_above['Gap Price'].iloc[0]:.2f}%",
-                        delta=f"{top_10_above['Gap Price'].iloc[0] - float(input_abnormal):.2f}%",
+                        delta=f"{top_10_above['Gap Price'].iloc[0] - float(out_house_input_abnormal):.2f}%",
                         delta_color="inverse",
                     )
                 with col3:
@@ -476,7 +527,7 @@ try:
                     )
 
     with n[1]:
-        st.markdown(f"### Top 10 Below -{input_abnormal}%")
+        st.markdown(f"### Top 10 Below -{out_house_input_abnormal}%")
 
         # Get top 10 below data
         top_10_below = (
@@ -518,7 +569,7 @@ try:
                     st.metric(
                         label="Lowest Gap",
                         value=f"{top_10_below['Gap Price'].iloc[0]:.2f}%",
-                        delta=f"{top_10_below['Gap Price'].iloc[0] + float(input_abnormal):.2f}%",
+                        delta=f"{top_10_below['Gap Price'].iloc[0] + float(out_house_input_abnormal):.2f}%",
                         delta_color="normal",
                     )
 
@@ -543,7 +594,7 @@ try:
 
         # Create and display chart
         if selected_source:
-            chart = uv.create_pie_chart_out_house(abnormal_cal_out, selected_source, input_abnormal)
+            chart = uv.create_pie_chart_out_house(abnormal_cal_out, selected_source, out_house_input_abnormal)
             st.plotly_chart(chart, use_container_width=True)
 
             # Calculate and display statistics
@@ -552,12 +603,13 @@ try:
 
             if total_items_oh > 0:
                 normal_count_oh = filtered_data[filtered_data["Status"] == "Normal"].shape[0]
-                abnormal_above_oh = filtered_data[filtered_data["Status"] == f"Abnormal Above {input_abnormal}%"].shape[
-                    0
-                ]
+                abnormal_above_oh = \
+                    filtered_data[filtered_data["Status"] == f"Abnormal Above {out_house_input_abnormal}%"].shape[
+                        0
+                    ]
                 abnormal_below_oh = filtered_data[
-                    filtered_data["Status"] == f"Abnormal Below -{input_abnormal}%"
-                ].shape[0]
+                    filtered_data["Status"] == f"Abnormal Below -{out_house_input_abnormal}%"
+                    ].shape[0]
 
     with st.container(border=True):
         st.subheader(f"{selected_source} Summary Statistics")
@@ -595,8 +647,9 @@ try:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
 except Exception as e:
-    if "KeyError" in str(e):
-        st.warning("There was an issue with your database query. Please check your input parameters.")
+    st.warning(e)
+    # if "KeyError" in str(e):
+    #     st.warning("There was an issue with your database query. Please check your input parameters.")
 
 # ======================================== PACKING ========================================
 st.divider()
@@ -616,12 +669,12 @@ def get_packing_data(years, abnormal_threshold):
             st.warning("There was an issue with your database query. Please check your input parameters.")
             return pd.DataFrame(), pd.DataFrame()
         else:
-            raise e
+            return pd.DataFrame(), pd.DataFrame()
 
 
 try:
     # Get packing data
-    status_items_packing, abnormal_cal_packing = get_packing_data(years, input_abnormal)
+    status_items_packing, abnormal_cal_packing = get_packing_data(years, packing_input_abnormal)
 
     # Process data
 
@@ -631,15 +684,15 @@ try:
 
     # Generate Excel files
     generate_excel_packing = uf.convert_to_excel_format_packaging(
-        abnormal_cal_packing, input_previous_year, input_current_year, int(input_abnormal)
+        abnormal_cal_packing, input_previous_year, input_current_year, int(packing_input_abnormal)
     )
 
-    abnormal_filter_packing = (abnormal_cal_packing["Status"] == f"Abnormal Above {input_abnormal}%") | (
-        abnormal_cal_packing["Status"] == f"Abnormal Below {input_abnormal}%"
+    abnormal_filter_packing = (abnormal_cal_packing["Status"] == f"Abnormal Above {packing_input_abnormal}%") | (
+            abnormal_cal_packing["Status"] == f"Abnormal Below {packing_input_abnormal}%"
     )
     abnormal_filtered_packing = abnormal_cal_packing[abnormal_filter_packing]
     generate_excel_filtered_packing = uf.convert_to_excel_format_packaging(
-        abnormal_filtered_packing, input_previous_year, input_current_year, int(input_abnormal)
+        abnormal_filtered_packing, input_previous_year, input_current_year, int(packing_input_abnormal)
     )
 
     # Display metrics
@@ -651,7 +704,7 @@ try:
     with mc[1]:
         st.subheader("Abnormal Number")
         m = st.columns(3, gap="small")
-        statuses = [f"Abnormal Above {input_abnormal}%", "Normal", f"Abnormal Below -{input_abnormal}%"]
+        statuses = [f"Abnormal Above {packing_input_abnormal}%", "Normal", f"Abnormal Below -{packing_input_abnormal}%"]
         for i, status in enumerate(statuses):
             with m[i]:
                 st.metric(label=status, value=abnormal_counts_packing.get(status, 0))
@@ -683,7 +736,7 @@ try:
 
         # Create and display chart
         if selected_destination:
-            chart = uv.create_pie_chart_packing(abnormal_cal_packing, selected_destination, input_abnormal)
+            chart = uv.create_pie_chart_packing(abnormal_cal_packing, selected_destination, packing_input_abnormal)
             st.plotly_chart(chart, use_container_width=True)
 
             # Calculate and display statistics
@@ -692,8 +745,10 @@ try:
 
             if total_items > 0:
                 normal_count = filtered_data[filtered_data["Status"] == "Normal"].shape[0]
-                abnormal_above = filtered_data[filtered_data["Status"] == f"Abnormal Above {input_abnormal}%"].shape[0]
-                abnormal_below = filtered_data[filtered_data["Status"] == f"Abnormal Below -{input_abnormal}%"].shape[0]
+                abnormal_above = \
+                    filtered_data[filtered_data["Status"] == f"Abnormal Above {packing_input_abnormal}%"].shape[0]
+                abnormal_below = \
+                    filtered_data[filtered_data["Status"] == f"Abnormal Below -{packing_input_abnormal}%"].shape[0]
 
     with st.container(border=True):
         st.subheader(f"{selected_destination} Summary Statistics")
@@ -707,7 +762,7 @@ try:
 
     # Left column - Top 10 Above
     with n[0]:
-        st.markdown(f"### Top 10 Above {input_abnormal}%")
+        st.markdown(f"### Top 10 Above {packing_input_abnormal}%")
 
         # Get top 10 above data
         top_10_above = (
@@ -759,7 +814,7 @@ try:
                     st.metric(
                         label="Highest Gap",
                         value=f"{top_10_above['Gap Total Cost'].iloc[0]:.2f}%",
-                        delta=f"{top_10_above['Gap Total Cost'].iloc[0] - float(input_abnormal):.2f}%",
+                        delta=f"{top_10_above['Gap Total Cost'].iloc[0] - float(packing_input_abnormal):.2f}%",
                         delta_color="inverse",
                     )
                 with col3:
@@ -770,7 +825,7 @@ try:
                     )
 
     with n[1]:
-        st.markdown(f"### Top 10 Below -{input_abnormal}%")
+        st.markdown(f"### Top 10 Below -{packing_input_abnormal}%")
 
         # Get top 10 below data
         top_10_below = (
@@ -823,7 +878,7 @@ try:
                     st.metric(
                         label="Lowest Gap",
                         value=f"{top_10_below['Gap Total Cost'].iloc[0]:.2f}%",
-                        delta=f"{top_10_below['Gap Total Cost'].iloc[0] + float(input_abnormal):.2f}%",
+                        delta=f"{top_10_below['Gap Total Cost'].iloc[0] + float(packing_input_abnormal):.2f}%",
                         delta_color="normal",
                     )
 
@@ -836,43 +891,102 @@ try:
     # Display download buttons
     display_download_buttons(generate_excel_packing, generate_excel_filtered_packing, "packing")
 except Exception as e:
-    if "KeyError" in str(e):
-        st.warning("There was an issue with your database query. Please check your input parameters.")
+    st.warning(e)
+    # if "KeyError" in str(e):
+    #     st.warning("There was an issue with your database query. Please check your input parameters.")
 
 allowed_update_roles = ["archmagus", "oracles"]
 if st.session_state["roles"][0] in allowed_update_roles:
+    current_date = datetime.now()
+    formatted_date = current_date.strftime("%d%m%y").upper()
     st.divider()
     col = st.columns(2, border=True)
     with col[0]:
         st.subheader("Abnormality Report")
-        if st.button("Generate PDF"):
+        col1, col2, col3 = st.columns([0.45, 0.3, 0.25], gap="small")
+
+        with col1:
+            with st.form(key="generate_form", border=False):
+                data_type = st.selectbox("Select Data Type", options=['in_house', 'out_house', 'packing', 'complete'],
+                                         index=0)
+                generate_button = st.form_submit_button(label="Generate PDF", type="primary")
+
+        with col2:
+            # Create a placeholder for the download button
+            download_button_placeholder = st.empty()
+
+        # If generate button is clicked, generate the PDF and show download button
+        if generate_button:
             with st.spinner("Generating PDF..."):
-                pdf_data = ag.generate_pdf_report(
+                pdf_data = generate_report(
+                    data_type,
                     years=years,
                     df_inhouse=full_abnormal_cal_impl,
                     df_outhouse=abnormal_cal_out,
                     df_packing=abnormal_cal_packing,
-                    boundaries=input_abnormal,
+                    boundaries=[int(in_house_input_abnormal), int(out_house_input_abnormal),
+                                int(packing_input_abnormal)]
                 )
 
+                # Show download button in the placeholder
                 pdf_bytes = bytes(pdf_data)
-                st.download_button(
+                download_button_placeholder.download_button(
                     label="Download PDF Report",
                     data=pdf_bytes,
-                    file_name=f"Report Abnomality {input_current_year}-{input_previous_year}.pdf",
+                    file_name=f"Full Report Abnomality {input_current_year}-{input_previous_year}-{formatted_date}.pdf",
                     mime="application/pdf",
                 )
+
     with col[1]:
-        st.subheader("Approve All Normal Data")
-        if st.button("Approve", use_container_width=False):
-            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-            config_path = os.path.join(project_root, "config/database-dev.yaml")
-            config = conn.load_config(config_path)
-            if not config:
-                st.error("Failed to load configuration. Exiting.")
-            else:
-                db_connection = conn.DatabaseConnection(config["database"])
-                try:
-                    ra.approve_normal_data(db_connection=db_connection)
-                except Exception:
-                    st.error("❌ Failed to approve the Normal data")
+        st.subheader("Approve Normal Data")
+        in_house_normal_data = abnormal_cal_impl[abnormal_cal_impl["Status Abnormal"] == "Normal"].drop(
+            "Status Abnormal", axis=1
+        ).drop("Explanation Status", axis=1)
+        out_house_normal_data = abnormal_cal_out[abnormal_cal_out["Status"] == "Normal"].drop("Status", axis=1).drop(
+            "Explanation Status", axis=1)
+        packing_normal_data = abnormal_cal_packing[abnormal_cal_packing["Status"] == "Normal"].drop("Status",
+                                                                                                    axis=1).drop(
+            "Explanation Status", axis=1)
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            if st.button("Approve In House", use_container_width=False):
+                project_root = os.path.abspath(os.path.join(os.path.dirname(__file__)))
+                config_path = os.path.join(project_root, "config/database-dev.yaml")
+                config = rc.load_config(config_path)
+                if not config:
+                    st.error("Failed to load configuration. Exiting.")
+                else:
+                    db_connection = rc.DatabaseConnection(config["database"])
+                    try:
+                        result = ra.approve_in_house_data(in_house_normal_data, db_connection, input_current_year)
+                    except Exception:
+                        st.error("❌ Failed to approve the In House Normal data")
+
+        with col2:
+            if st.button("Approve Out House", use_container_width=False):
+                project_root = os.path.abspath(os.path.join(os.path.dirname(__file__)))
+                config_path = os.path.join(project_root, "config/database-dev.yaml")
+                config = rc.load_config(config_path)
+                if not config:
+                    st.error("Failed to load configuration. Exiting.")
+                else:
+                    db_connection = rc.DatabaseConnection(config["database"])
+                    try:
+                        result = ra.approve_out_house_data(out_house_normal_data, db_connection, input_current_year)
+                    except Exception:
+                        st.error("❌ Failed to approve the Normal data")
+        with col3:
+            if st.button("Approve Packing", use_container_width=False):
+                project_root = os.path.abspath(os.path.join(os.path.dirname(__file__)))
+                config_path = os.path.join(project_root, "config/database-dev.yaml")
+                config = rc.load_config(config_path)
+                if not config:
+                    st.error("Failed to load configuration. Exiting.")
+                else:
+                    db_connection = rc.DatabaseConnection(config["database"])
+                    try:
+                        result = ra.approve_packing_data(packing_normal_data, db_connection, input_current_year)
+                    except Exception:
+                        st.error("❌ Failed to approve the Normal data")

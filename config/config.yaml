@@ -55,11 +55,21 @@ credentials:
             roles:
                 - treasurers
 
-        sung.jinwoo:
-            email: nathasa.romanoff@toyota.co.id
+        anthony.christanto:
+            email: anthony.christanto@toyota.co.id
             failed_login_attempts: 0
-            first_name: Sung
-            last_name: Jinwoo
+            first_name: Anthony
+            last_name: Christanto
+            logged_in: false
+            password: $2a$12$N.v7a2hyjRkLAuLbAg5MqOGSU8XphF2owpg9E9ZEUaUKbFYbcj5vS
+            roles:
+                - oracles
+
+        made.bhaswara:
+            email: anthony.christanto@toyota.co.id
+            failed_login_attempts: 0
+            first_name: Anthony
+            last_name: Christanto
             logged_in: false
             password: $2a$12$N.v7a2hyjRkLAuLbAg5MqOGSU8XphF2owpg9E9ZEUaUKbFYbcj5vS
             roles:

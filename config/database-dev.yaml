@@ -3,5 +3,5 @@ database:
     port: 5432
     user: "hafiyyankisaragi"
     password: ""
-    db_name: "MSP_DATABASE"
+    db_name: "MSP_DB_ADJ"
     driver: "postgresql" # or "mysql"

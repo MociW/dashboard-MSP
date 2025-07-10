@@ -61,7 +61,7 @@ def abnormal_cal_out_house(years, boundaries):
     SELECT
         d1.part_no,
         d1.part_name,
-        d1.source,
+        d2.source,
         d1.price AS "Price {year1}",
         d2.price AS "Price {year2}",
         ROUND(
@@ -101,7 +101,7 @@ def abnormal_cal_out_house(years, boundaries):
 
 def abnormal_cal_out_house_per_part(years):
     q_abnormal = """
-    WITH 
+   WITH 
     dataframe AS (
         SELECT
         LEFT(o.part_no, 5) AS "part_num",
@@ -119,19 +119,21 @@ def abnormal_cal_out_house_per_part(years):
     
     price_changes AS (
         SELECT
-        d1.part_num,
-        d1.part_no,
-        d1.part_name,
-        d1.source,
+        COALESCE(d1.part_num, d2.part_num) AS part_num,
+        COALESCE(d1.part_no, d2.part_no) AS part_no,
+        COALESCE(d1.part_name, d2.part_name) AS part_name,
+        d2.source,
         d1.price AS "price_{year1}",
         d2.price AS "price_{year2}",
-        ROUND(((d2.price - d1.price) / NULLIF(d1.price, 0)) * 100, 2) AS "price_gap_percent"
+        CASE 
+            WHEN d1.price IS NULL THEN NULL
+            ELSE ROUND(((d2.price - d1.price) / NULLIF(d1.price, 0)) * 100, 2)
+        END AS "price_gap_percent"
         FROM
-        dataframe d1
-        JOIN dataframe d2 ON d1.part_no = d2.part_no
-        WHERE
-        d1.year_item = {year1}
-        AND d2.year_item = {year2}
+        (SELECT * FROM dataframe WHERE year_item = {year1}) d1
+        RIGHT JOIN 
+        (SELECT * FROM dataframe WHERE year_item = {year2}) d2 
+        ON d1.part_no = d2.part_no
     ),
     
     part_counts AS (
@@ -163,6 +165,8 @@ def abnormal_cal_out_house_per_part(years):
         price_changes pc
         JOIN
         valid_parts vp ON pc.part_num = vp.part_num
+        WHERE 
+        pc.price_gap_percent IS NOT NULL
         GROUP BY
         pc.part_num
     ),
@@ -184,7 +188,7 @@ def abnormal_cal_out_house_per_part(years):
         (gs.q3 + 1.5 * (gs.q3 - gs.q1)) AS upper_bound
         FROM 
         price_changes pc
-        JOIN 
+        LEFT JOIN 
         group_stats gs ON pc.part_num = gs.part_num
     )
     
@@ -208,6 +212,7 @@ def abnormal_cal_out_house_per_part(years):
         ELSE 'Normal'
     END AS price_status
     --   CASE
+    --     WHEN price_gap_percent IS NULL THEN NULL
     --     WHEN price_gap_percent < lower_bound THEN price_gap_percent - lower_bound
     --     WHEN price_gap_percent > upper_bound THEN price_gap_percent - upper_bound
     --     ELSE 0

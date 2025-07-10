@@ -13,6 +13,7 @@ def input_out_house_new_data(excel_file, db_connection):
 
     failed_parts = []  # List to store failed part numbers
     success_count = 0  # Counter for successful updates
+    skipped_count = 0  # Counter for skipped entries
 
     # Use the provided connection
     with db_connection as connection:
@@ -21,11 +22,19 @@ def input_out_house_new_data(excel_file, db_connection):
             for index, row in df.iterrows():
                 try:
                     # Check if part_no already exists in out_house
+                    part_no = str(row["part_no"])
+                    if len(part_no) > 10:
+                        failed_parts.append(
+                            {"part_no": part_no, "row": index + 1,
+                             "error": "Part number exceeds maximum length (10 characters)"}
+                        )
+                        continue
+
                     cursor.execute(
                         """
                         SELECT "id" FROM "out_house" WHERE "part_no" = %s
                         """,
-                        (row["part_no"],),
+                        (part_no,),
                     )
                     result = cursor.fetchone()
                     if result:
@@ -42,13 +51,27 @@ def input_out_house_new_data(excel_file, db_connection):
                             (out_house_id, row["part_no"], row["part_name"]),
                         )
 
-                    # Insert into out_house_detail
                     cursor.execute(
                         """
-                        INSERT INTO "out_house_detail" ("out_house_item", "price", "source", "year_item", "created_at")
-                        VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
-                        RETURNING "id"
+                        SELECT "id" FROM "out_house_detail" WHERE "out_house_item" = %s AND "year_item" = %s
                         """,
+                        (out_house_id, row["year"]),
+                    )
+
+                    existing_entry = cursor.fetchone()
+
+                    if existing_entry:
+                        # Skip if the entry already exists
+                        skipped_count += 1
+                        print(f"Skipping entry for part {row['part_no']} in year {row['year']} - Already exists")
+                        continue
+
+                    cursor.execute(
+                        """
+                            INSERT INTO "out_house_detail" ("out_house_item", "price", "source", "year_item", "created_at")
+                            VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                            RETURNING "id"
+                            """,
                         (
                             out_house_id,
                             round(row["price"], 0),
@@ -60,11 +83,19 @@ def input_out_house_new_data(excel_file, db_connection):
                     success_count += 1
 
                 except Exception as e:
-                    error_message = f"Error updating row {index + 1} for part {row.get('part_no', 'unknown')}: {e}"
+                    error_message = f"Error processing row {index + 1} for part {row.get('part_no', 'unknown')}: {e}"
                     print(error_message)
                     failed_parts.append({"part_no": row.get("part_no", "unknown"), "row": index + 1, "error": str(e)})
                     connection.rollback()
 
+    # Print summary of operation
+    print("Operation Summary:")
+    print(f"Total rows processed: {len(df)}")
+    print(f"Successful insertions: {success_count}")
+    print(f"Skipped entries: {skipped_count}")
+    print(f"Failed entries: {len(failed_parts)}")
+
+    # Return details for further processing if needed
     return {"total": len(df), "success": success_count, "failed": len(failed_parts), "failed_parts": failed_parts}
 
 
@@ -79,6 +110,12 @@ def update_out_house_data(excel_file, db_connection):
         with connection.cursor() as cursor:
             for index, row in df.iterrows():
                 try:
+                    part_no = str(row["part_no"])
+                    if len(row["part_no"])>10:
+                        failed_parts.append(
+                            {"part_no": row.get("part_no", "unknown"), "row": index + 1, "error": str(e)})
+                        continue
+
                     # Check if part_no exists
                     cursor.execute(
                         """

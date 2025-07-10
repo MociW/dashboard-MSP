@@ -5,6 +5,7 @@ import repository.in_house as ri
 import repository.packing as rp
 import pandas as pd
 import os
+import io
 
 # Initialize session state variables if they don't exist
 if "authentication_status" not in st.session_state:
@@ -81,11 +82,17 @@ if st.session_state["authentication_status"]:
                             with st.expander("View Failed Records"):
                                 st.dataframe(failed_df)
 
-                                # Add option to download failed records as CSV
-                                excel = failed_df.to_excel(index=False)
+                                buffer = io.BytesIO()
+                                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                                    failed_df.to_excel(writer, index=False, sheet_name='Failed Records')
+
+                                # Reset the buffer position to the beginning
+                                buffer.seek(0)
+
+                                # Offer the Excel download button
                                 st.download_button(
                                     label="Download Failed Records Excel",
-                                    data=excel,
+                                    data=buffer,
                                     file_name="failed_imports.xlsx",
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                 )
@@ -102,13 +109,13 @@ if st.session_state["authentication_status"]:
     with col1:
         try:
             # Read the template file
-            with open("resource/in_house_template_input_database.xlsx", "rb") as template_file:
+            with open("resource/in_house_template_update_database.xlsx", "rb") as template_file:
                 template_bytes_in = template_file.read()
 
             st.download_button(
                 label="Download Template Inhouse",
                 data=template_bytes_in,
-                file_name="in_house_template_input_data.xlsx",
+                file_name="in_house_template_update_data.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
         except FileNotFoundError:
@@ -117,13 +124,13 @@ if st.session_state["authentication_status"]:
     with col2:
         try:
             # Read the template file
-            with open("resource/out_house_template_input_database.xlsx", "rb") as template_file:
+            with open("resource/out_house_template_update_database.xlsx", "rb") as template_file:
                 template_bytes_out = template_file.read()
 
             st.download_button(
                 label="Download Template Outhouse",
                 data=template_bytes_out,
-                file_name="out_house_template_input_database.xlsx",
+                file_name="out_house_template_update_database.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
         except FileNotFoundError:
@@ -132,13 +139,13 @@ if st.session_state["authentication_status"]:
     with col3:
         try:
             # Read the template file
-            with open("resource/packing_template_input_database.xlsx", "rb") as template_file:
+            with open("resource/packing_template_update_database.xlsx", "rb") as template_file:
                 template_bytes_packing = template_file.read()
 
             st.download_button(
                 label="Download Template Packing",
                 data=template_bytes_packing,
-                file_name="packing_template_input_database.xlsx",
+                file_name="packing_template_update_database.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
         except FileNotFoundError:
